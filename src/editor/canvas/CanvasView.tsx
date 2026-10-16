@@ -13,11 +13,13 @@ export function CanvasView({
   session,
   frame,
   axisSnap,
+  axisLocked,
   onChange,
 }: {
   session: EditorSession;
   frame: number;
   axisSnap: 'center' | 'edge';
+  axisLocked: boolean;
   onChange: () => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -26,6 +28,7 @@ export function CanvasView({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; midX: number; midY: number; viewport: Viewport } | null>(null);
   const hands = useRef(false);
+  const pasteDrag = useRef<{ x: number; y: number } | null>(null);
   const panning = useRef(false);
   const axisDrag = useRef<AxisName | null>(null);
   const lastPan = useRef({ x: 0, y: 0 });
@@ -166,6 +169,7 @@ export function CanvasView({
         if (pointers.current.size >= 2) {
           hands.current = true;
           panning.current = false;
+          pasteDrag.current = null;
           axisDrag.current = null;
           setAxisCursor(null);
           setReadout(null);
@@ -175,7 +179,7 @@ export function CanvasView({
           onChange();
           return;
         }
-        const hit = axisHit(session, event.clientX, event.clientY, pixelRef.current);
+        const hit = axisLocked ? null : axisHit(session, event.clientX, event.clientY, pixelRef.current);
         if (hit) {
           axisDrag.current = hit;
           setAxisCursor(hit);
@@ -186,6 +190,10 @@ export function CanvasView({
         if (event.button === 1 || session.tool === 'pan' || space.current) {
           panning.current = true;
           lastPan.current = { x: event.clientX, y: event.clientY };
+          return;
+        }
+        if (session.pasteOrigin) {
+          pasteDrag.current = cellAt(event);
           return;
         }
         session.pointerDown(cellAt(event));
@@ -216,6 +224,19 @@ export function CanvasView({
           remember(session, viewport, onChange, saveTimer);
           return;
         }
+        if (pasteDrag.current) {
+          const cell = cellAt(event);
+          if (cell) {
+            const dx = cell.x - pasteDrag.current.x;
+            const dy = cell.y - pasteDrag.current.y;
+            if (dx !== 0 || dy !== 0) {
+              session.movePaste(dx, dy);
+              pasteDrag.current = cell;
+            }
+          }
+          onChange();
+          return;
+        }
         session.pointerMove(cellAt(event));
         onChange();
       }}
@@ -236,6 +257,11 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (pasteDrag.current) {
+          pasteDrag.current = null;
+          onChange();
+          return;
+        }
         if (draggedAxis) {
           onChange();
           return;
@@ -247,6 +273,7 @@ export function CanvasView({
         pointers.current.clear();
         pinch.current = null;
         hands.current = false;
+        pasteDrag.current = null;
         panning.current = false;
         axisDrag.current = null;
         setAxisCursor(null);
@@ -418,7 +445,7 @@ function drawAxes(
   dragging: AxisName | null,
 ): void {
   const symmetry = session.doc.symmetry;
-  if (symmetry.mode === 'off' || !symmetry.showAxes) return;
+  if (symmetry.mode === 'off') return;
   const cellPx = viewport.cellSize * viewport.scale;
   ctx.setLineDash([]);
   const strokeAxis = (which: AxisName) => {
@@ -483,7 +510,7 @@ function axisHit(
   canvas: HTMLCanvasElement | null,
 ): AxisName | null {
   const symmetry = session.doc.symmetry;
-  if (!canvas || symmetry.mode === 'off' || !symmetry.showAxes) return null;
+  if (!canvas || symmetry.mode === 'off') return null;
   const rect = canvas.getBoundingClientRect();
   const x = clientX - rect.left;
   const y = clientY - rect.top;

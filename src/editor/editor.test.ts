@@ -3,6 +3,7 @@ import { backingStoreSize, gestureViewport, resizeViewport, screenToCell, zoomAt
 import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
+import { pickRecentColor } from './palette/palette.ts';
 import { EditorSession } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
@@ -197,6 +198,17 @@ describe('shapes', () => {
     editor.pointerUp();
     expect(editor.doc.cells[2 * 8 + 1]).toBe(1);
     expect(editor.doc.cells[2 * 8 + mirrorColumn(1, 8)]).toBe(1);
+  });
+});
+
+describe('recent colors', () => {
+  it('keeps an existing hex in place and appends a new one', () => {
+    const palette = createDocument(2, 2).palette;
+    expect(pickRecentColor(palette, '#1a1614')).toMatchObject({ slot: 1, palette });
+    const added = pickRecentColor(palette, '#112233');
+    expect(added?.slot).toBe(2);
+    expect(added?.palette).toHaveLength(2);
+    expect(added?.palette[0]).toBe(palette[0]);
   });
 });
 

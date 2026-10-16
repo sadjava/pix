@@ -13,7 +13,7 @@ import {
   normalizeSelection,
   type SelectionRect,
 } from './selection/selection.ts';
-import { colorUsed, removeColor, slotOf } from './palette/palette.ts';
+import { colorUsed, pickRecentColor, removeColor, slotOf } from './palette/palette.ts';
 
 export interface GesturePreview {
   points: Point[];
@@ -90,6 +90,13 @@ export class EditorSession {
 
   setColorSlot(slot: number): void {
     this.colorSlot = slot;
+  }
+
+  useColor(hex: string): void {
+    const picked = pickRecentColor(this.doc.palette, hex);
+    if (!picked) return;
+    if (picked.palette !== this.doc.palette) this.setView({ palette: picked.palette });
+    this.colorSlot = picked.slot;
   }
 
   pointerDown(cell: Point | null): void {

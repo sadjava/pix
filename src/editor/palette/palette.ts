@@ -9,14 +9,18 @@ export function normalizeHex(hex: string): string | null {
 }
 
 export function defaultPalette(): PaletteColor[] {
-  return [
-    { id: 'madder', name: 'Марена', hex: '#9e2a2b' },
-    { id: 'indigo', name: 'Индиго', hex: '#1f3a5f' },
-    { id: 'saffron', name: 'Шафран', hex: '#e2a122' },
-    { id: 'pine', name: 'Сосна', hex: '#2f6b4f' },
-    { id: 'ink', name: 'Чернь', hex: '#1a1614' },
-    { id: 'wool', name: 'Шерсть', hex: '#f4f0e6' },
-  ];
+  return [{ id: 'ink', name: 'Чернь', hex: '#1a1614' }];
+}
+
+/** Recent colors, newest at the end. ponytail: stops at 24; drop the oldest unused entry if a rug needs more. */
+export function pickRecentColor(palette: PaletteColor[], hex: string): { palette: PaletteColor[]; slot: number } | null {
+  const normalized = normalizeHex(hex);
+  if (!normalized) return null;
+  const existing = palette.findIndex((color) => color.hex === normalized);
+  if (existing >= 0) return { palette, slot: slotOf(existing) };
+  if (palette.length >= 24) return null;
+  const next = [...palette, { id: crypto.randomUUID(), name: normalized, hex: normalized }];
+  return { palette: next, slot: slotOf(next.length - 1) };
 }
 
 export function slotOf(paletteIndex: number): number {

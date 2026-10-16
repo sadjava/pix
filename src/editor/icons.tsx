@@ -24,6 +24,8 @@ export type IconName =
   | 'axisV'
   | 'axisH'
   | 'eye'
+  | 'lock'
+  | 'unlock'
   | 'snapEdge'
   | 'snapCenter'
   | 'crosshair'
@@ -31,6 +33,7 @@ export type IconName =
   | 'cut'
   | 'paste'
   | 'plus'
+  | 'minus'
   | 'trash'
   | 'image'
   | 'file'
@@ -134,6 +137,18 @@ const paths: Record<IconName, ReactNode> = {
       <circle cx="12" cy="12" r="2.5" />
     </>
   ),
+  lock: (
+    <>
+      <rect x="5" y="11" width="14" height="10" rx="1" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </>
+  ),
+  unlock: (
+    <>
+      <rect x="5" y="11" width="14" height="10" rx="1" />
+      <path d="M8 11V8a4 4 0 0 1 7.5-2" />
+    </>
+  ),
   snapEdge: (
     <>
       <path d="M4 6h6v12H4zM14 6h6v12h-6zM11 9v6" />
@@ -171,6 +186,7 @@ const paths: Record<IconName, ReactNode> = {
     </>
   ),
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   trash: (
     <>
       <path d="M4 7h16" />

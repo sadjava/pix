@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EditorPersistPayload, EditorSession } from './session.ts';
-import type { PaletteColor, ProjectRecord, SymmetryMode, ToolId } from '../model/types.ts';
+import type { ProjectRecord, SymmetryMode, ToolId } from '../model/types.ts';
 import { repository } from '../data/instance.ts';
 import { registerFlush } from '../app/flush.ts';
 import { SaveQueue } from '../data/autosave/queue.ts';
@@ -8,7 +8,7 @@ import { resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { CanvasView } from './canvas/CanvasView.tsx';
 import { EditorSession as Session } from './session.ts';
 import { selectionSizeLabel } from './session.ts';
-import { normalizeHex, slotOf, colorUsed } from './palette/palette.ts';
+import { slotOf } from './palette/palette.ts';
 import { ru } from '../i18n/ru.ts';
 import { pngBytes } from '../export/png.ts';
 import { exportProjectFile } from '../export/json.ts';
@@ -44,14 +44,13 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [pngChecker, setPngChecker] = useState(false);
   const [pngScale, setPngScale] = useState(8);
   const [pngBorder, setPngBorder] = useState(false);
-  const [hex, setHex] = useState('#9e2a2b');
-  const [colorName, setColorName] = useState('Нить');
-  const [replaceSlot, setReplaceSlot] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(() => window.matchMedia('(min-width: 1201px)').matches);
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
+  const [axisLocked, setAxisLocked] = useState(false);
+  const [draftHex, setDraftHex] = useState<string | null>(null);
+  const colorTimer = useRef(0);
   const refresh = () => setFrame((value) => value + 1);
-  const colorSlot = session?.colorSlot ?? 0;
 
   useEffect(() => {
     let cancel = false;
@@ -105,15 +104,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   useEffect(() => {
     onBusy(Boolean(sessionRef.current?.gesture));
   }, [frame, onBusy]);
-
-  useEffect(() => {
-    const editor = sessionRef.current;
-    if (!editor) return;
-    const color = editor.doc.palette[editor.colorSlot - 1];
-    if (!color) return;
-    setHex(color.hex);
-    setColorName(color.name);
-  }, [colorSlot]);
 
   useEffect(() => {
     const editor = sessionRef.current;
@@ -215,7 +205,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
         </button>
       </nav>
       <div className="stage">
-        <CanvasView session={session} frame={frame} axisSnap={axisSnap} onChange={refresh} />
+        <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} />
       </div>
       <button type="button" className="scrim" aria-label={ru.closePanel} onClick={() => setPanelOpen(false)} />
       <aside className="side" inert={!panelOpen}>
@@ -230,7 +220,9 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
               <input type="checkbox" checked={session.doc.checkerVisible} aria-label={ru.checker} onChange={(event) => { session.doc.checkerVisible = event.target.checked; saveView(); }} />
               <Icon name="checker" />
             </label>
-            <input className="mini" type="number" min={1} max={32} aria-label={ru.checkerBlock} title={ru.checkerBlock} value={session.doc.checkerBlock} onChange={(event) => { session.doc.checkerBlock = Number(event.target.value) || 1; saveView(); }} />
+            <button type="button" className="icon-btn" aria-label={ru.checkerLess} title={ru.checkerLess} disabled={session.doc.checkerBlock <= 1} onClick={() => { session.doc.checkerBlock = Math.max(1, session.doc.checkerBlock - 1); saveView(); }}><Icon name="minus" /></button>
+            <span className="step-value" aria-live="polite">{session.doc.checkerBlock}</span>
+            <button type="button" className="icon-btn" aria-label={ru.checkerMore} title={ru.checkerMore} disabled={session.doc.checkerBlock >= 32} onClick={() => { session.doc.checkerBlock = Math.min(32, session.doc.checkerBlock + 1); saveView(); }}><Icon name="plus" /></button>
           </div>
         </section>
         <section className="group" aria-label={ru.symmetry}>
@@ -253,21 +245,27 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
               />
               <Icon name="axisH" />
             </label>
-            <label className="tick" title={ru.showAxes}>
-              <input type="checkbox" checked={session.doc.symmetry.showAxes} aria-label={ru.showAxes} onChange={(event) => { session.doc.symmetry = { ...session.doc.symmetry, showAxes: event.target.checked }; saveView(); }} />
-              <Icon name="eye" />
-            </label>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={axisLocked ? ru.axisUnlock : ru.axisLock}
+              title={axisLocked ? ru.axisUnlock : ru.axisLock}
+              aria-pressed={axisLocked}
+              onClick={() => setAxisLocked((locked) => !locked)}
+            >
+              <Icon name={axisLocked ? 'lock' : 'unlock'} />
+            </button>
           </div>
           <div className="icon-row">
-            <button type="button" className="icon-btn" aria-label={ru.nudgeLeft} title={ru.nudgeLeft} onClick={() => nudge(session, 'axisX2', -1, axisSnap, saveView)}><Icon name="chevronLeft" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.nudgeRight} title={ru.nudgeRight} onClick={() => nudge(session, 'axisX2', 1, axisSnap, saveView)}><Icon name="chevronRight" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.nudgeUp} title={ru.nudgeUp} onClick={() => nudge(session, 'axisY2', -1, axisSnap, saveView)}><Icon name="chevronUp" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.nudgeDown} title={ru.nudgeDown} onClick={() => nudge(session, 'axisY2', 1, axisSnap, saveView)}><Icon name="chevronDown" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.nudgeLeft} title={ru.nudgeLeft} disabled={axisLocked} onClick={() => nudge(session, 'axisX2', -1, axisSnap, saveView)}><Icon name="chevronLeft" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.nudgeRight} title={ru.nudgeRight} disabled={axisLocked} onClick={() => nudge(session, 'axisX2', 1, axisSnap, saveView)}><Icon name="chevronRight" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.nudgeUp} title={ru.nudgeUp} disabled={axisLocked} onClick={() => nudge(session, 'axisY2', -1, axisSnap, saveView)}><Icon name="chevronUp" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.nudgeDown} title={ru.nudgeDown} disabled={axisLocked} onClick={() => nudge(session, 'axisY2', 1, axisSnap, saveView)}><Icon name="chevronDown" /></button>
           </div>
           <div className="icon-row">
-            <button type="button" className="icon-btn" aria-label={ru.snapEdge} title={ru.snapEdge} aria-pressed={axisSnap === 'edge'} onClick={() => chooseSnap('edge')}><Icon name="snapEdge" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.snapCenter} title={ru.snapCenter} aria-pressed={axisSnap === 'center'} onClick={() => chooseSnap('center')}><Icon name="snapCenter" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.centerAxes} title={ru.centerAxes} onClick={() => centerAxes(session, axisSnap, saveView)}><Icon name="crosshair" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.snapEdge} title={ru.snapEdge} aria-pressed={axisSnap === 'edge'} disabled={axisLocked} onClick={() => chooseSnap('edge')}><Icon name="snapEdge" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.snapCenter} title={ru.snapCenter} aria-pressed={axisSnap === 'center'} disabled={axisLocked} onClick={() => chooseSnap('center')}><Icon name="snapCenter" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.centerAxes} title={ru.centerAxes} disabled={axisLocked} onClick={() => centerAxes(session, axisSnap, saveView)}><Icon name="crosshair" /></button>
           </div>
           <p className="axis-coords" title={`${axisLabel(session.doc.symmetry.axisX2, session.doc.width, true)}. ${axisLabel(session.doc.symmetry.axisY2, session.doc.height, false)}`}>
             {shortAxis(session.doc.symmetry.axisX2, session.doc.width)} · {shortAxis(session.doc.symmetry.axisY2, session.doc.height)}
@@ -278,9 +276,8 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           {session.notice ? <p className="note">{session.notice}</p> : null}
           {session.pasteClipped ? <p className="note">{ru.clipped}</p> : null}
           <div className="icon-row">
-            <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.cut} title={ru.cut} onClick={() => { session.cutSelection(); refresh(); }}><Icon name="cut" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} disabled={!session.selection} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} disabled={!session.clipboard} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
           </div>
           {session.pasteOrigin ? (
             <div className="icon-row">
@@ -296,39 +293,36 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
         </section>
         <section className="group" aria-label={ru.palette}>
           <div className="palette" aria-label={ru.palette}>
+            <label className="wheel" title={ru.pickColor}>
+              <input
+                type="color"
+                aria-label={ru.pickColor}
+                value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614'}
+                onChange={(event) => {
+                  const hex = event.target.value;
+                  setDraftHex(hex);
+                  window.clearTimeout(colorTimer.current);
+                  colorTimer.current = window.setTimeout(() => {
+                    session.useColor(hex);
+                    setDraftHex(null);
+                    refresh();
+                  }, 300);
+                }}
+              />
+            </label>
             {session.doc.palette.map((color, index) => (
               <button
                 key={color.id}
                 type="button"
                 className="swatch"
                 style={{ background: color.hex }}
-                aria-label={color.name}
-                title={`${color.name} ${color.hex}`}
+                aria-label={color.hex}
+                title={color.hex}
                 aria-pressed={session.colorSlot === slotOf(index)}
-                onClick={() => { session.setColorSlot(slotOf(index)); setHex(color.hex); setColorName(color.name); refresh(); }}
+                onClick={() => { session.setColorSlot(slotOf(index)); refresh(); }}
               />
             ))}
           </div>
-          <input aria-label={ru.colorName} placeholder={ru.colorName} value={colorName} onChange={(event) => setColorName(event.target.value)} />
-          <span className="hex-row">
-            <input type="color" value={normalizeHex(hex) ?? '#9e2a2b'} aria-label={ru.hex} onChange={(event) => setHex(event.target.value)} />
-            <input aria-label={ru.hex} value={hex} spellCheck={false} onChange={(event) => setHex(event.target.value)} />
-          </span>
-          <div className="icon-row">
-            <button type="button" className="icon-btn" aria-label={ru.addColor} title={ru.addColor} onClick={() => add(session, colorName, hex, refresh)}><Icon name="plus" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.editColor} title={ru.editColor} onClick={() => edit(session, colorName, hex, refresh)}><Icon name="pencil" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.deleteColor} title={ru.deleteColor} onClick={() => { if (session.deleteColor(session.colorSlot - 1, replaceSlot)) refresh(); }}><Icon name="trash" /></button>
-          </div>
-          {session.colorSlot > 0 && colorUsed(session.doc.cells, session.colorSlot) ? (
-            <label>{ru.replaceWith}
-              <select value={replaceSlot} onChange={(event) => setReplaceSlot(Number(event.target.value))}>
-                <option value={0}>{ru.emptyColor}</option>
-                {session.doc.palette.map((color, index) => (
-                  <option key={color.id} value={slotOf(index)}>{color.name}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
         </section>
         <section className="group" aria-label={ru.project}>
           <ResizeForm session={session} onDone={refresh} />
@@ -380,23 +374,6 @@ function ResizeForm({ session, onDone }: { session: EditorSession; onDone: () =>
       </div>
     </form>
   );
-}
-
-function add(session: EditorSession, name: string, hex: string, refresh: () => void): void {
-  const normalized = normalizeHex(hex);
-  if (!normalized) return;
-  const color: PaletteColor = { id: crypto.randomUUID(), name: name || 'Цвет', hex: normalized };
-  session.setView({ palette: [...session.doc.palette, color] });
-  session.setColorSlot(session.doc.palette.length);
-  refresh();
-}
-
-function edit(session: EditorSession, name: string, hex: string, refresh: () => void): void {
-  const normalized = normalizeHex(hex);
-  if (!normalized || session.colorSlot < 1) return;
-  const palette = session.doc.palette.map((color, index) => index === session.colorSlot - 1 ? { ...color, name: name || color.name, hex: normalized } : color);
-  session.setView({ palette });
-  refresh();
 }
 
 function nudge(

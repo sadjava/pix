@@ -1,0 +1,71 @@
+import type { PaletteColor, SymmetrySettings } from '../model/types.ts';
+
+/** One current row per rug. The database stores columns, not a JSON file. */
+export interface RugRow {
+  id: string;
+  ownerId: string;
+  name: string;
+  width: number;
+  height: number;
+  schemaVersion: number;
+  documentRevision: number;
+  updatedAt: string;
+  palette: PaletteColor[];
+  cells: string;
+  gridVisible: boolean;
+  checkerVisible: boolean;
+  checkerBlock: number;
+  symmetry: SymmetrySettings;
+  contentHash: string;
+}
+
+export interface SyncTransport {
+  upsert(row: RugRow): Promise<void>;
+  get(projectId: string): Promise<RugRow | null>;
+  list(): Promise<RugRow[]>;
+}
+
+export type SyncDecision = 'push' | 'pull' | 'conflict' | 'skip';
+
+/** Local edits and a newer remote row at the same time stay side by side. */
+export function decideSync(localRevision: number, syncedRevision: number, remoteRevision: number | null): SyncDecision {
+  if (remoteRevision === null) return 'push';
+  if (remoteRevision === localRevision) return 'skip';
+  const localDirty = localRevision !== syncedRevision;
+  const remoteDirty = remoteRevision !== syncedRevision;
+  if (localDirty && remoteDirty) return 'conflict';
+  if (remoteDirty && remoteRevision > localRevision) return 'pull';
+  return 'push';
+}
+
+export function syncedRevision(cloudRevisionId: string | null): number {
+  if (!cloudRevisionId) return 0;
+  const value = Number(cloudRevisionId);
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+export interface BackupRecordPatch {
+  documentRevision: number;
+  syncState: 'local-only' | 'pending' | 'uploading' | 'backed-up' | 'error' | 'conflict';
+  lastCloudBackupAt: string | null;
+  cloudRevisionId: string | null;
+}
+
+/** An older finished upload must not mark a newer local revision as backed up. */
+export function applyBackupSuccess(
+  record: BackupRecordPatch,
+  completedRevision: number,
+  versionId: string,
+  at: string,
+  conflict: boolean,
+): BackupRecordPatch {
+  if (completedRevision < record.documentRevision) {
+    return record.syncState === 'backed-up' || record.syncState === 'conflict'
+      ? record
+      : { ...record, syncState: 'pending' };
+  }
+  if (conflict) {
+    return { ...record, syncState: 'conflict', lastCloudBackupAt: at, cloudRevisionId: versionId };
+  }
+  return { ...record, syncState: 'backed-up', lastCloudBackupAt: at, cloudRevisionId: versionId };
+}

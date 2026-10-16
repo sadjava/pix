@@ -15,13 +15,3 @@ export async function storageIsPersisted(): Promise<boolean | null> {
     return null;
   }
 }
-
-export async function storageEstimate(): Promise<{ usage: number; quota: number } | null> {
-  try {
-    if (typeof navigator === 'undefined' || !navigator.storage?.estimate) return null;
-    const estimate = await navigator.storage.estimate();
-    return { usage: estimate.usage ?? 0, quota: estimate.quota ?? 0 };
-  } catch {
-    return null;
-  }
-}

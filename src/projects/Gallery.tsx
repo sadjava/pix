@@ -3,10 +3,9 @@ import type { RugRow } from '../backup/protocol.ts';
 import { documentFromRow } from '../backup/restore.ts';
 import { syncAccount } from '../backup/outbox.ts';
 import { repository } from '../data/instance.ts';
-import { requestPersistentStorage, storageEstimate, storageIsPersisted } from '../data/storage.ts';
-import { createDocument, sizeDecision } from '../editor/canvas/grid.ts';
+import { requestPersistentStorage, storageIsPersisted } from '../data/storage.ts';
+import { sizeDecision } from '../editor/canvas/grid.ts';
 import { emptyHistory } from '../editor/history/patches.ts';
-import { parseProjectFile } from '../export/json.ts';
 import { ru } from '../i18n/ru.ts';
 import type { ProjectRecord } from '../model/types.ts';
 
@@ -21,7 +20,8 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
   const [password, setPassword] = useState('');
   const [versions, setVersions] = useState<RugRow[]>([]);
   const [compare, setCompare] = useState('');
-  const configured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
+  const [backupOn, setBackupOn] = useState(false);
+  const configured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 
   async function reload(): Promise<void> {
     setProjects(await repository.list());
@@ -29,6 +29,7 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
 
   useEffect(() => {
     void reload().then(() => syncIfEnabled(reload));
+    void repository.readMeta<boolean>('backupEnabled').then((value) => setBackupOn(Boolean(value)));
   }, []);
 
   return (
@@ -74,22 +75,11 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
         <h2>{ru.diagnostics}</h2>
         <button type="button" onClick={() => void showStorage(setStorageText)}>{ru.persistAsk}</button>
         {storageText ? <p>{storageText}</p> : null}
-        <label className="file">
-          {ru.importJson}
-          <input
-            type="file"
-            accept="application/json,.json"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importJson(file, setMessage, reload);
-            }}
-          />
-        </label>
         {configured ? (
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              void signIn(email, password, setMessage);
+              void signIn(email, password, setMessage, setBackupOn, reload);
             }}
           >
             <h2>{ru.signIn}</h2>
@@ -99,8 +89,13 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
             <label className="check">
               <input
                 type="checkbox"
+                checked={backupOn}
                 onChange={(event) => {
-                  void repository.writeMeta('backupEnabled', event.target.checked);
+                  const enabled = event.target.checked;
+                  setBackupOn(enabled);
+                  void repository.writeMeta('backupEnabled', enabled).then(() => {
+                    if (enabled) return syncIfEnabled(reload);
+                  });
                 }}
               />
               {ru.backupToggle}
@@ -184,74 +179,57 @@ async function remove(project: ProjectRecord, reload: () => Promise<void>): Prom
   await reload();
 }
 
-async function importJson(file: File, setMessage: (value: string | null) => void, reload: () => Promise<void>): Promise<void> {
-  const parsed = parseProjectFile(await file.text());
-  if (!parsed.ok) {
-    setMessage(parsed.error);
-    return;
-  }
-  const created = await repository.create({ name: parsed.file.name, width: parsed.file.width, height: parsed.file.height });
-  const doc = createDocument(parsed.file.width, parsed.file.height, parsed.file.palette);
-  doc.cells = parsed.cells;
-  doc.gridVisible = parsed.file.gridVisible;
-  doc.checkerVisible = parsed.file.checkerVisible;
-  doc.checkerBlock = parsed.file.checkerBlock;
-  doc.symmetry = parsed.file.symmetry;
-  await repository.commit(created.record.id, {
-    doc,
-    history: emptyHistory(),
-    patches: [],
-    opNumber: created.record.documentRevision,
-    type: 'import',
-  });
-  setMessage(null);
-  await reload();
-}
-
 async function showStorage(setStorageText: (value: string) => void): Promise<void> {
   const granted = await requestPersistentStorage();
   const persisted = await storageIsPersisted();
-  const estimate = await storageEstimate();
-  const quota = estimate ? `${Math.round(estimate.usage / 1024)} / ${Math.round(estimate.quota / 1024)} КБ` : '';
-  setStorageText(`${persisted || granted ? ru.persistOn : ru.persistOff} ${quota} ${ru.persistNote}`);
+  setStorageText(persisted || granted ? ru.persistOn : ru.persistOff);
 }
 
-async function signIn(email: string, password: string, setMessage: (value: string | null) => void): Promise<void> {
+async function signIn(
+  email: string,
+  password: string,
+  setMessage: (value: string | null) => void,
+  setBackupOn: (value: boolean) => void,
+  reload: () => Promise<void>,
+): Promise<void> {
   const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !publishableKey) return;
   const { signIn: signInUser } = await import('../backup/supabase/adapter.ts');
-  const userId = await signInUser({ url, anonKey, ownerId: 'pending' }, email, password);
+  const userId = await signInUser({ url, publishableKey, ownerId: 'pending' }, email, password);
   if (!userId) {
     setMessage(ru.signInFailed);
     return;
   }
   await repository.writeMeta('backupUserId', userId);
+  await repository.writeMeta('backupEnabled', true);
+  setBackupOn(true);
   setMessage(null);
+  await syncIfEnabled(reload);
 }
 
 async function syncIfEnabled(reload: () => Promise<void>): Promise<void> {
   const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const ownerId = await repository.readMeta<string>('backupUserId');
   const enabled = await repository.readMeta<boolean>('backupEnabled');
-  if (!url || !anonKey || !ownerId || !enabled || !navigator.onLine) return;
+  if (!url || !publishableKey || !ownerId || !enabled || !navigator.onLine) return;
   const { createSupabaseTransport } = await import('../backup/supabase/adapter.ts');
-  const transport = await createSupabaseTransport({ url, anonKey, ownerId });
+  const transport = await createSupabaseTransport({ url, publishableKey, ownerId });
   await syncAccount(repository, transport, ownerId, new Date().toISOString());
   await reload();
 }
 
 async function loadVersions(setVersions: (versions: RugRow[]) => void, setMessage: (value: string | null) => void): Promise<void> {
   const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const ownerId = await repository.readMeta<string>('backupUserId');
-  if (!url || !anonKey || !ownerId) {
+  if (!url || !publishableKey || !ownerId) {
     setMessage(ru.backupOff);
     return;
   }
   const { createSupabaseTransport } = await import('../backup/supabase/adapter.ts');
-  const transport = await createSupabaseTransport({ url, anonKey, ownerId });
+  const transport = await createSupabaseTransport({ url, publishableKey, ownerId });
   setVersions(await transport.list());
 }
 

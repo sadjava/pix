@@ -1,4 +1,4 @@
--- Current rug row per project. The client uses only the anon/publishable key.
+-- Current rug row per project. The client uses only the publishable key.
 -- The service key stays off the client.
 
 create table if not exists public.rugs (
@@ -20,6 +20,8 @@ create table if not exists public.rugs (
 );
 
 alter table public.rugs enable row level security;
+
+grant select, insert, update, delete on table public.rugs to authenticated;
 
 create policy rugs_select
   on public.rugs

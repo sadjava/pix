@@ -3,13 +3,14 @@ import type { RugRow, SyncTransport } from '../protocol.ts';
 
 export interface SupabaseConfig {
   url: string;
-  anonKey: string;
+  publishableKey: string;
   ownerId: string;
 }
 
 export async function createSupabaseTransport(config: SupabaseConfig): Promise<SyncTransport> {
+  assertPublishable(config.publishableKey);
   const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(config.url, config.anonKey, {
+  const client = createClient(config.url, config.publishableKey, {
     auth: { persistSession: true, autoRefreshToken: true },
   });
   return {
@@ -31,11 +32,16 @@ export async function createSupabaseTransport(config: SupabaseConfig): Promise<S
 }
 
 export async function signIn(config: SupabaseConfig, email: string, password: string): Promise<string | null> {
+  if (config.publishableKey.startsWith('sb_secret_')) return null;
   const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(config.url, config.anonKey);
+  const client = createClient(config.url, config.publishableKey);
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error || !data.user) return null;
   return data.user.id;
+}
+
+function assertPublishable(key: string): void {
+  if (key.startsWith('sb_secret_')) throw new Error('forbidden');
 }
 
 function toRow(row: RugRow): Record<string, unknown> {

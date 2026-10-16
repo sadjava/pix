@@ -30,13 +30,6 @@ const tools: { id: ToolId; label: string; icon: IconName }[] = [
   { id: 'pan', label: ru.pan, icon: 'pan' },
 ];
 
-const symmetryModes: { id: SymmetryMode; label: string }[] = [
-  { id: 'off', label: ru.symmetryOff },
-  { id: 'vertical', label: ru.symmetryVertical },
-  { id: 'horizontal', label: ru.symmetryHorizontal },
-  { id: 'both', label: ru.symmetryBoth },
-];
-
 export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () => void; onBusy: (busy: boolean) => void }) {
   const sessionRef = useRef<EditorSession | null>(null);
   const payloadRef = useRef<EditorPersistPayload | null>(null);
@@ -165,9 +158,8 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   return (
     <div className={`editor${toolsOpen ? '' : ' is-tools-hidden'}${panelOpen ? ' panel-open' : ''}`}>
       <header className="topbar">
-        <button type="button" className="icon-btn back" onClick={() => leave(session, queue, onBack)}>
+        <button type="button" className="icon-btn" aria-label={ru.back} title={ru.back} onClick={() => leave(session, queue, onBack)}>
           <Icon name="chevronLeft" />
-          {ru.back}
         </button>
         {!toolsOpen ? (
           <button type="button" className="icon-btn" aria-label={ru.expandTools} title={ru.expandTools} onClick={() => setToolsOpen(true)}>
@@ -177,10 +169,14 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
         <strong className="project-name">{record.name}</strong>
         <span className="project-size">{session.doc.width} × {session.doc.height}</span>
         <span className="top-spacer" />
-        <span className={localClass(localText)} title={localText}>{localText}</span>
-        <span className={cloudClass(record.syncState)} title={backupLabel(record.syncState)}>{backupLabel(record.syncState)}</span>
+        <span className={`status-icon ${localClass(localText)}`} title={localText} aria-label={localText}>
+          <Icon name={localText === ru.saveError ? 'alert' : localText === ru.saved ? 'check' : 'retry'} />
+        </span>
+        <span className={`status-icon ${cloudClass(record.syncState)}`} title={backupLabel(record.syncState)} aria-label={backupLabel(record.syncState)}>
+          <Icon name="cloud" />
+        </span>
         {localText === ru.saveError ? (
-          <button type="button" onClick={() => retry(queue, payloadRef.current, id, setRecord)}>{ru.retry}</button>
+          <button type="button" className="icon-btn" aria-label={ru.retry} title={ru.retry} onClick={() => retry(queue, payloadRef.current, id, setRecord)}><Icon name="retry" /></button>
         ) : null}
         <button type="button" className="icon-btn" aria-label={ru.undo} title={ru.undo} onClick={() => { session.undo(); refresh(); }}>
           <Icon name="undo" />
@@ -224,72 +220,81 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
       <button type="button" className="scrim" aria-label={ru.closePanel} onClick={() => setPanelOpen(false)} />
       <aside className="side" inert={!panelOpen}>
         {error ? <p className="warning">{error}</p> : null}
-        <section className="group">
-          <h2>{ru.display}</h2>
-          <label className="check"><input type="checkbox" checked={session.doc.gridVisible} onChange={(event) => { session.doc.gridVisible = event.target.checked; saveView(); }} />{ru.grid}</label>
-          <label className="check"><input type="checkbox" checked={session.doc.checkerVisible} onChange={(event) => { session.doc.checkerVisible = event.target.checked; saveView(); }} />{ru.checker}</label>
-          <label>{ru.checkerBlock}
-            <input type="number" min={1} max={32} value={session.doc.checkerBlock} onChange={(event) => { session.doc.checkerBlock = Number(event.target.value) || 1; saveView(); }} />
-          </label>
-        </section>
-        <section className="group">
-          <h2>{ru.symmetry}</h2>
-          <div className="seg" role="group" aria-label={ru.symmetry}>
-            {symmetryModes.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                aria-pressed={session.doc.symmetry.mode === mode.id}
-                onClick={() => { session.doc.symmetry = { ...session.doc.symmetry, mode: mode.id }; saveView(); }}
-              >
-                {mode.label}
-              </button>
-            ))}
+        <section className="group" aria-label={ru.display}>
+          <div className="icon-row">
+            <label className="tick" title={ru.grid}>
+              <input type="checkbox" checked={session.doc.gridVisible} aria-label={ru.grid} onChange={(event) => { session.doc.gridVisible = event.target.checked; saveView(); }} />
+              <Icon name="grid" />
+            </label>
+            <label className="tick" title={ru.checker}>
+              <input type="checkbox" checked={session.doc.checkerVisible} aria-label={ru.checker} onChange={(event) => { session.doc.checkerVisible = event.target.checked; saveView(); }} />
+              <Icon name="checker" />
+            </label>
+            <input className="mini" type="number" min={1} max={32} aria-label={ru.checkerBlock} title={ru.checkerBlock} value={session.doc.checkerBlock} onChange={(event) => { session.doc.checkerBlock = Number(event.target.value) || 1; saveView(); }} />
           </div>
-          <label className="check">
-            <input type="checkbox" checked={session.doc.symmetry.showAxes} onChange={(event) => { session.doc.symmetry = { ...session.doc.symmetry, showAxes: event.target.checked }; saveView(); }} />
-            {ru.showAxes}
-          </label>
-          <div className="nudge">
-            <span>{ru.axisVertical}</span>
+        </section>
+        <section className="group" aria-label={ru.symmetry}>
+          <div className="icon-row">
+            <label className="tick" title={ru.symmetryVertical}>
+              <input
+                type="checkbox"
+                checked={session.doc.symmetry.mode === 'vertical' || session.doc.symmetry.mode === 'both'}
+                aria-label={ru.symmetryVertical}
+                onChange={(event) => setSymmetry(session, event.target.checked, session.doc.symmetry.mode === 'horizontal' || session.doc.symmetry.mode === 'both', saveView)}
+              />
+              <Icon name="axisV" />
+            </label>
+            <label className="tick" title={ru.symmetryHorizontal}>
+              <input
+                type="checkbox"
+                checked={session.doc.symmetry.mode === 'horizontal' || session.doc.symmetry.mode === 'both'}
+                aria-label={ru.symmetryHorizontal}
+                onChange={(event) => setSymmetry(session, session.doc.symmetry.mode === 'vertical' || session.doc.symmetry.mode === 'both', event.target.checked, saveView)}
+              />
+              <Icon name="axisH" />
+            </label>
+            <label className="tick" title={ru.showAxes}>
+              <input type="checkbox" checked={session.doc.symmetry.showAxes} aria-label={ru.showAxes} onChange={(event) => { session.doc.symmetry = { ...session.doc.symmetry, showAxes: event.target.checked }; saveView(); }} />
+              <Icon name="eye" />
+            </label>
+          </div>
+          <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.nudgeLeft} title={ru.nudgeLeft} onClick={() => nudge(session, 'axisX2', -1, axisSnap, saveView)}><Icon name="chevronLeft" /></button>
             <button type="button" className="icon-btn" aria-label={ru.nudgeRight} title={ru.nudgeRight} onClick={() => nudge(session, 'axisX2', 1, axisSnap, saveView)}><Icon name="chevronRight" /></button>
-            <span>{ru.axisHorizontal}</span>
             <button type="button" className="icon-btn" aria-label={ru.nudgeUp} title={ru.nudgeUp} onClick={() => nudge(session, 'axisY2', -1, axisSnap, saveView)}><Icon name="chevronUp" /></button>
             <button type="button" className="icon-btn" aria-label={ru.nudgeDown} title={ru.nudgeDown} onClick={() => nudge(session, 'axisY2', 1, axisSnap, saveView)}><Icon name="chevronDown" /></button>
           </div>
-          <div className="seg">
-            <button type="button" aria-pressed={axisSnap === 'edge'} onClick={() => chooseSnap('edge')}>{ru.snapEdge}</button>
-            <button type="button" aria-pressed={axisSnap === 'center'} onClick={() => chooseSnap('center')}>{ru.snapCenter}</button>
+          <div className="icon-row">
+            <button type="button" className="icon-btn" aria-label={ru.snapEdge} title={ru.snapEdge} aria-pressed={axisSnap === 'edge'} onClick={() => chooseSnap('edge')}><Icon name="snapEdge" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.snapCenter} title={ru.snapCenter} aria-pressed={axisSnap === 'center'} onClick={() => chooseSnap('center')}><Icon name="snapCenter" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.centerAxes} title={ru.centerAxes} onClick={() => centerAxes(session, axisSnap, saveView)}><Icon name="crosshair" /></button>
           </div>
-          <button type="button" onClick={() => centerAxes(session, axisSnap, saveView)}>{ru.centerAxes}</button>
-          <p className="axis-coords">{axisLabel(session.doc.symmetry.axisX2, session.doc.width, true)}</p>
-          <p className="axis-coords">{axisLabel(session.doc.symmetry.axisY2, session.doc.height, false)}</p>
+          <p className="axis-coords" title={`${axisLabel(session.doc.symmetry.axisX2, session.doc.width, true)}. ${axisLabel(session.doc.symmetry.axisY2, session.doc.height, false)}`}>
+            {shortAxis(session.doc.symmetry.axisX2, session.doc.width)} · {shortAxis(session.doc.symmetry.axisY2, session.doc.height)}
+          </p>
         </section>
-        <section className="group">
-          <h2>{ru.selection}</h2>
+        <section className="group" aria-label={ru.selection}>
           {session.selection ? <p className="note">{selectionSizeLabel(session.selection)}</p> : null}
           {session.notice ? <p className="note">{session.notice}</p> : null}
           {session.pasteClipped ? <p className="note">{ru.clipped}</p> : null}
-          <div className="row">
-            <button type="button" onClick={() => { session.copySelection(); refresh(); }}>{ru.copy}</button>
-            <button type="button" onClick={() => { session.cutSelection(); refresh(); }}>{ru.cut}</button>
-            <button type="button" onClick={() => { session.beginPaste(); refresh(); }}>{ru.paste}</button>
+          <div className="icon-row">
+            <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.cut} title={ru.cut} onClick={() => { session.cutSelection(); refresh(); }}><Icon name="cut" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
           </div>
           {session.pasteOrigin ? (
-            <div className="row">
+            <div className="icon-row">
               <button type="button" className="icon-btn" aria-label={ru.nudgeLeft} onClick={() => { session.movePaste(-1, 0); refresh(); }}><Icon name="chevronLeft" /></button>
               <button type="button" className="icon-btn" aria-label={ru.nudgeRight} onClick={() => { session.movePaste(1, 0); refresh(); }}><Icon name="chevronRight" /></button>
               <button type="button" className="icon-btn" aria-label={ru.nudgeUp} onClick={() => { session.movePaste(0, -1); refresh(); }}><Icon name="chevronUp" /></button>
               <button type="button" className="icon-btn" aria-label={ru.nudgeDown} onClick={() => { session.movePaste(0, 1); refresh(); }}><Icon name="chevronDown" /></button>
-              <button type="button" onClick={() => { session.confirmPaste(); refresh(); }}>{ru.pasteConfirm}</button>
-              <button type="button" onClick={() => { session.cancelPaste(); refresh(); }}>{ru.cancel}</button>
+              <button type="button" className="icon-btn" aria-label={ru.pasteConfirm} title={ru.pasteConfirm} onClick={() => { session.confirmPaste(); refresh(); }}><Icon name="check" /></button>
+              <button type="button" className="icon-btn" aria-label={ru.cancel} title={ru.cancel} onClick={() => { session.cancelPaste(); refresh(); }}><Icon name="x" /></button>
             </div>
           ) : null}
           {session.pasteOrigin ? <p className="note">{ru.pasteHint}</p> : null}
         </section>
-        <section className="group">
-          <h2>{ru.palette}</h2>
+        <section className="group" aria-label={ru.palette}>
           <div className="palette" aria-label={ru.palette}>
             {session.doc.palette.map((color, index) => (
               <button
@@ -304,37 +309,34 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
               />
             ))}
           </div>
-          <button type="button" aria-pressed={session.tool === 'picker'} onClick={() => { session.setTool('picker'); refresh(); }}>{ru.picker}</button>
-          <label>{ru.colorName}<input value={colorName} onChange={(event) => setColorName(event.target.value)} /></label>
-          <label>{ru.hex}
-            <span className="hex-row">
-              <input type="color" value={normalizeHex(hex) ?? '#9e2a2b'} aria-label={ru.hex} onChange={(event) => setHex(event.target.value)} />
-              <input value={hex} spellCheck={false} onChange={(event) => setHex(event.target.value)} />
-            </span>
-          </label>
-          <div className="row">
-            <button type="button" onClick={() => add(session, colorName, hex, refresh)}>{ru.addColor}</button>
-            <button type="button" onClick={() => edit(session, colorName, hex, refresh)}>{ru.editColor}</button>
+          <input aria-label={ru.colorName} placeholder={ru.colorName} value={colorName} onChange={(event) => setColorName(event.target.value)} />
+          <span className="hex-row">
+            <input type="color" value={normalizeHex(hex) ?? '#9e2a2b'} aria-label={ru.hex} onChange={(event) => setHex(event.target.value)} />
+            <input aria-label={ru.hex} value={hex} spellCheck={false} onChange={(event) => setHex(event.target.value)} />
+          </span>
+          <div className="icon-row">
+            <button type="button" className="icon-btn" aria-label={ru.addColor} title={ru.addColor} onClick={() => add(session, colorName, hex, refresh)}><Icon name="plus" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.editColor} title={ru.editColor} onClick={() => edit(session, colorName, hex, refresh)}><Icon name="pencil" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.deleteColor} title={ru.deleteColor} onClick={() => { if (session.deleteColor(session.colorSlot - 1, replaceSlot)) refresh(); }}><Icon name="trash" /></button>
           </div>
-          {session.colorSlot > 0 && colorUsed(session.doc.cells, session.colorSlot) ? <p className="note">{ru.usedColor}</p> : null}
-          <label>{ru.replaceWith}
-            <select value={replaceSlot} onChange={(event) => setReplaceSlot(Number(event.target.value))}>
-              <option value={0}>{ru.emptyColor}</option>
-              {session.doc.palette.map((color, index) => (
-                <option key={color.id} value={slotOf(index)}>{color.name}</option>
-              ))}
-            </select>
-          </label>
-          <button type="button" onClick={() => { if (session.deleteColor(session.colorSlot - 1, replaceSlot)) refresh(); }}>{ru.deleteColor}</button>
+          {session.colorSlot > 0 && colorUsed(session.doc.cells, session.colorSlot) ? (
+            <label>{ru.replaceWith}
+              <select value={replaceSlot} onChange={(event) => setReplaceSlot(Number(event.target.value))}>
+                <option value={0}>{ru.emptyColor}</option>
+                {session.doc.palette.map((color, index) => (
+                  <option key={color.id} value={slotOf(index)}>{color.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </section>
-        <section className="group">
-          <h2>{ru.project}</h2>
+        <section className="group" aria-label={ru.project}>
           <ResizeForm session={session} onDone={refresh} />
-          <div className="row">
-            <button type="button" onClick={() => setPngOpen(true)}>{ru.exportPng}</button>
-            <button type="button" onClick={() => download(new TextEncoder().encode(exportProjectFile(record.id, record.name, session.doc)), `${record.name}.json`, 'application/json')}>{ru.exportJson}</button>
+          <div className="icon-row">
+            <button type="button" className="icon-btn" aria-label={ru.exportPng} title={ru.exportPng} onClick={() => setPngOpen(true)}><Icon name="image" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.exportJson} title={ru.exportJson} onClick={() => download(new TextEncoder().encode(exportProjectFile(record.id, record.name, session.doc)), `${record.name}.json`, 'application/json')}><Icon name="file" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.backupRetry} title={ru.backupRetry} onClick={() => void backupNow(record, session)}><Icon name="cloud" /></button>
           </div>
-          <button type="button" onClick={() => void backupNow(record, session)}>{ru.backupRetry}</button>
         </section>
       </aside>
       {pngOpen ? (
@@ -371,10 +373,11 @@ function ResizeForm({ session, onDone }: { session: EditorSession; onDone: () =>
         onDone();
       }}
     >
-      <p className="note">{ru.resize}</p>
-      <label>{ru.width}<input type="number" min={1} max={4000} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
-      <label>{ru.height}<input type="number" min={1} max={4000} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
-      <button type="submit">{ru.applySize}</button>
+      <div className="icon-row">
+        <input className="mini" type="number" min={1} max={4000} aria-label={ru.width} title={ru.width} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+        <input className="mini" type="number" min={1} max={4000} aria-label={ru.height} title={ru.height} value={height} onChange={(event) => setHeight(Number(event.target.value))} />
+        <button type="submit" className="icon-btn" aria-label={ru.applySize} title={ru.applySize}><Icon name="check" /></button>
+      </div>
     </form>
   );
 }
@@ -417,6 +420,22 @@ function centerAxes(session: EditorSession, mode: 'center' | 'edge', done: () =>
     axisY2: clampAxis(snapAxis(session.doc.height, mode), session.doc.height),
   };
   done();
+}
+
+function setSymmetry(session: EditorSession, vertical: boolean, horizontal: boolean, saveView: () => void): void {
+  const mode: SymmetryMode = vertical && horizontal ? 'both' : vertical ? 'vertical' : horizontal ? 'horizontal' : 'off';
+  session.doc.symmetry = { ...session.doc.symmetry, mode };
+  saveView();
+}
+
+function shortAxis(axis2: number, edge: number): string {
+  if (axis2 % 2 === 0) {
+    const n = axis2 / 2;
+    if (n <= 0) return '0';
+    if (n >= edge) return String(edge);
+    return `${n}–${n + 1}`;
+  }
+  return String(Math.ceil(axis2 / 2));
 }
 
 function clampAxis(axis2: number, edge: number): number {
@@ -466,14 +485,14 @@ function backupLabel(state: ProjectRecord['syncState']): string {
 
 async function backupNow(record: ProjectRecord, session: EditorSession): Promise<void> {
   const url = import.meta.env.VITE_SUPABASE_URL;
-  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const ownerId = await repository.readMeta<string>('backupUserId');
   const enabled = await repository.readMeta<boolean>('backupEnabled');
-  if (!url || !anonKey || !ownerId || !enabled || session.gesture || !navigator.onLine) return;
+  if (!url || !publishableKey || !ownerId || !enabled || session.gesture || !navigator.onLine) return;
   if (record.syncState === 'backed-up' && record.documentRevision === session.revision) return;
   await enqueueBackup(repository, { ...record, documentRevision: session.revision });
   const { createSupabaseTransport } = await import('../backup/supabase/adapter.ts');
-  const transport = await createSupabaseTransport({ url, anonKey, ownerId });
+  const transport = await createSupabaseTransport({ url, publishableKey, ownerId });
   await drainOutbox(repository, transport, ownerId, new Date().toISOString());
 }
 

@@ -18,7 +18,27 @@ export type IconName =
   | 'chevronUp'
   | 'chevronDown'
   | 'panel'
-  | 'fit';
+  | 'fit'
+  | 'grid'
+  | 'checker'
+  | 'axisV'
+  | 'axisH'
+  | 'eye'
+  | 'snapEdge'
+  | 'snapCenter'
+  | 'crosshair'
+  | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'plus'
+  | 'trash'
+  | 'image'
+  | 'file'
+  | 'cloud'
+  | 'check'
+  | 'alert'
+  | 'retry'
+  | 'x';
 
 const paths: Record<IconName, ReactNode> = {
   pencil: <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />,
@@ -94,6 +114,98 @@ const paths: Record<IconName, ReactNode> = {
       <path d="M3 16v3a2 2 0 0 0 2 2h3" />
     </>
   ),
+  grid: (
+    <>
+      <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />
+    </>
+  ),
+  checker: (
+    <>
+      <path d="M4 4h7v7H4z" fill="currentColor" stroke="none" />
+      <path d="M13 13h7v7h-7z" fill="currentColor" stroke="none" />
+      <path d="M13 4h7v7h-7zM4 13h7v7H4z" />
+    </>
+  ),
+  axisV: <path d="M12 3v18M8 8h8M8 16h8" />,
+  axisH: <path d="M3 12h18M8 8v8M16 8v8" />,
+  eye: (
+    <>
+      <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="2.5" />
+    </>
+  ),
+  snapEdge: (
+    <>
+      <path d="M4 6h6v12H4zM14 6h6v12h-6zM11 9v6" />
+    </>
+  ),
+  snapCenter: (
+    <>
+      <path d="M6 6h12v12H6z" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    </>
+  ),
+  crosshair: (
+    <>
+      <circle cx="12" cy="12" r="6" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </>
+  ),
+  copy: (
+    <>
+      <path d="M8 8h12v12H8z" />
+      <path d="M4 16V5a1 1 0 0 1 1-1h11" />
+    </>
+  ),
+  cut: (
+    <>
+      <circle cx="6" cy="7" r="2.5" />
+      <circle cx="6" cy="17" r="2.5" />
+      <path d="m20 4-9 9M11 11 20 20" />
+    </>
+  ),
+  paste: (
+    <>
+      <path d="M7 6h10v15H7z" />
+      <path d="M9 6V4h6v2" />
+    </>
+  ),
+  plus: <path d="M12 5v14M5 12h14" />,
+  trash: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M9 7V5h6v2" />
+      <path d="m7 7 1 13h8l1-13" />
+    </>
+  ),
+  image: (
+    <>
+      <path d="M4 6h16v12H4z" />
+      <circle cx="9" cy="10" r="1.4" fill="currentColor" stroke="none" />
+      <path d="m4 16 5-4 4 3 3-2 4 3" />
+    </>
+  ),
+  file: (
+    <>
+      <path d="M7 3h7l4 4v14H7z" />
+      <path d="M14 3v5h5" />
+    </>
+  ),
+  cloud: <path d="M7 18h10a4 4 0 0 0 .4-8 6 6 0 0 0-11.5 1.6A3.5 3.5 0 0 0 7 18Z" />,
+  check: <path d="m5 12 5 5L20 7" />,
+  alert: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v5M12 16h.01" />
+    </>
+  ),
+  retry: (
+    <>
+      <path d="M20 12a8 8 0 1 1-2.3-5.7" />
+      <path d="M20 4v6h-6" />
+    </>
+  ),
+  x: <path d="M6 6l12 12M18 6 6 18" />,
 };
 
 export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {

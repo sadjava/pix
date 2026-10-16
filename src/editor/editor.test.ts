@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backingStoreSize, resizeViewport, screenToCell, zoomAt } from './canvas/coords.ts';
+import { backingStoreSize, gestureViewport, resizeViewport, screenToCell, zoomAt } from './canvas/coords.ts';
 import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
@@ -37,6 +37,19 @@ describe('coordinates', () => {
     const centerBefore = screenToCell(5 + 100, 7 + 50, rect, viewport, 1);
     const centerAfter = screenToCell(5 + 50, 7 + 100, { ...rect, width: 100, height: 200 }, resized, 1);
     expect(centerAfter).toEqual(centerBefore);
+  });
+
+  it('pans when two fingers move together and zooms when they spread', () => {
+    const origin = { midX: 40, midY: 50, distance: 100 };
+    const panned = gestureViewport(viewport, origin, 70, 80, 100);
+    expect(panned.scale).toBe(viewport.scale);
+    expect(panned.panX).toBeCloseTo(viewport.panX + 30);
+    expect(panned.panY).toBeCloseTo(viewport.panY + 30);
+    const zoomed = gestureViewport(viewport, origin, 40, 50, 200);
+    const before = screenToCell(rect.left + 40, rect.top + 50, rect, viewport, 1);
+    const after = screenToCell(rect.left + 40, rect.top + 50, rect, zoomed, 1);
+    expect(zoomed.scale).toBe(4);
+    expect(after).toEqual(before);
   });
 });
 

@@ -48,7 +48,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [colorName, setColorName] = useState('Нить');
   const [replaceSlot, setReplaceSlot] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(true);
-  const [panelOpen, setPanelOpen] = useState(() => window.matchMedia('(min-width: 861px)').matches);
+  const [panelOpen, setPanelOpen] = useState(() => window.matchMedia('(min-width: 1201px)').matches);
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const refresh = () => setFrame((value) => value + 1);
   const colorSlot = session?.colorSlot ?? 0;

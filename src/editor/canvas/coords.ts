@@ -65,6 +65,21 @@ export function panBy(viewport: Viewport, dx: number, dy: number): Viewport {
   return { ...viewport, panX: viewport.panX + dx, panY: viewport.panY + dy };
 }
 
+/** Two fingers: a shared drag pans, a change in distance zooms around the first midpoint. */
+export function gestureViewport(
+  start: Viewport,
+  origin: { midX: number; midY: number; distance: number },
+  midX: number,
+  midY: number,
+  distance: number,
+): Viewport {
+  const ratio = origin.distance > 0 ? distance / origin.distance : 1;
+  const scale = clampScale(start.scale * ratio);
+  const worldX = (origin.midX - start.panX) / start.scale;
+  const worldY = (origin.midY - start.panY) / start.scale;
+  return { ...start, scale, panX: midX - worldX * scale, panY: midY - worldY * scale };
+}
+
 export function clampScale(scale: number): number {
   if (!Number.isFinite(scale)) return 1;
   return Math.min(12, Math.max(0.05, scale));

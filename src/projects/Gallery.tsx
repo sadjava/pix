@@ -39,6 +39,34 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
         <p>{ru.appName}</p>
       </header>
       {message ? <p className="warning">{message}</p> : null}
+      {configured ? (
+        <form
+          className="auth"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void signIn(email, password, setMessage, setBackupOn, reload);
+          }}
+        >
+          <h2>{ru.signIn}</h2>
+          <label>{ru.email}<input type="email" value={email} autoComplete="username" onChange={(event) => setEmail(event.target.value)} /></label>
+          <label>{ru.password}<input type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} /></label>
+          <button type="submit">{ru.signIn}</button>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={backupOn}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setBackupOn(enabled);
+                void repository.writeMeta('backupEnabled', enabled).then(() => {
+                  if (enabled) return syncIfEnabled(reload);
+                });
+              }}
+            />
+            {ru.backupToggle}
+          </label>
+        </form>
+      ) : <p>{ru.backupOff}</p>}
       <form
         className="create"
         onSubmit={(event) => {
@@ -75,34 +103,7 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
         <h2>{ru.diagnostics}</h2>
         <button type="button" onClick={() => void showStorage(setStorageText)}>{ru.persistAsk}</button>
         {storageText ? <p>{storageText}</p> : null}
-        {configured ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void signIn(email, password, setMessage, setBackupOn, reload);
-            }}
-          >
-            <h2>{ru.signIn}</h2>
-            <label>{ru.email}<input type="email" value={email} autoComplete="username" onChange={(event) => setEmail(event.target.value)} /></label>
-            <label>{ru.password}<input type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} /></label>
-            <button type="submit">{ru.signIn}</button>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={backupOn}
-                onChange={(event) => {
-                  const enabled = event.target.checked;
-                  setBackupOn(enabled);
-                  void repository.writeMeta('backupEnabled', enabled).then(() => {
-                    if (enabled) return syncIfEnabled(reload);
-                  });
-                }}
-              />
-              {ru.backupToggle}
-            </label>
-            <button type="button" onClick={() => void loadVersions(setVersions, setMessage)}>{ru.showBackups}</button>
-          </form>
-        ) : <p>{ru.backupOff}</p>}
+        {configured ? <button type="button" onClick={() => void loadVersions(setVersions, setMessage)}>{ru.showBackups}</button> : null}
         {compare ? <p>{compare}</p> : null}
         <ul>
           {versions.map((version) => (

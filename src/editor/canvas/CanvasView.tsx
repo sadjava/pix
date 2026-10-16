@@ -5,7 +5,7 @@ import { renderRgba } from '../../export/png.ts';
 import { ru } from '../../i18n/ru.ts';
 import { axisLabel } from '../symmetry/axisLabel.ts';
 import { Icon } from '../icons.tsx';
-import { axis2FromCellSpace, backingStoreSize, fitViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
+import { axis2FromCellSpace, backingStoreSize, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
 
 type AxisName = 'vertical' | 'horizontal';
 
@@ -24,7 +24,8 @@ export function CanvasView({
   const pixelRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ distance: number; scale: number; panX: number; panY: number } | null>(null);
+  const pinch = useRef<{ distance: number; midX: number; midY: number; viewport: Viewport } | null>(null);
+  const hands = useRef(false);
   const panning = useRef(false);
   const axisDrag = useRef<AxisName | null>(null);
   const lastPan = useRef({ x: 0, y: 0 });
@@ -79,8 +80,15 @@ export function CanvasView({
       );
       remember(session, viewport, onChange, saveTimer);
     };
+    const blockTouch = (event: TouchEvent) => {
+      if (event.touches.length > 0) event.preventDefault();
+    };
     wrap.addEventListener('wheel', onWheel, { passive: false });
-    return () => wrap.removeEventListener('wheel', onWheel);
+    wrap.addEventListener('touchmove', blockTouch, { passive: false });
+    return () => {
+      wrap.removeEventListener('wheel', onWheel);
+      wrap.removeEventListener('touchmove', blockTouch);
+    };
   }, [session, onChange]);
 
   useEffect(() => {
@@ -156,21 +164,14 @@ export function CanvasView({
         }
         pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (pointers.current.size >= 2) {
+          hands.current = true;
+          panning.current = false;
           axisDrag.current = null;
           setAxisCursor(null);
           setReadout(null);
           session.cancelGesture();
-          const pair = [...pointers.current.values()];
-          const a = pair[0];
-          const b = pair[1];
-          if (a && b) {
-            pinch.current = {
-              distance: Math.hypot(a.x - b.x, a.y - b.y) || 1,
-              scale: session.doc.viewport.scale,
-              panX: session.doc.viewport.panX,
-              panY: session.doc.viewport.panY,
-            };
-          }
+          const gesture = fingerPair(pointers.current, pixelRef.current);
+          if (gesture) pinch.current = { ...gesture, viewport: { ...session.doc.viewport } };
           onChange();
           return;
         }
@@ -193,20 +194,12 @@ export function CanvasView({
       onPointerMove={(event) => {
         if (!pointers.current.has(event.pointerId)) return;
         pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        if (pointers.current.size >= 2 && pinch.current && pixelRef.current) {
-          const pair = [...pointers.current.values()];
-          const a = pair[0];
-          const b = pair[1];
-          if (!a || !b) return;
-          const rect = pixelRef.current.getBoundingClientRect();
-          const distance = Math.hypot(a.x - b.x, a.y - b.y) || 1;
-          const viewport = zoomAt(
-            { ...session.doc.viewport, scale: pinch.current.scale, panX: pinch.current.panX, panY: pinch.current.panY },
-            (a.x + b.x) / 2 - rect.left,
-            (a.y + b.y) / 2 - rect.top,
-            pinch.current.scale * (distance / pinch.current.distance),
-          );
-          remember(session, viewport, onChange, saveTimer);
+        if (hands.current) {
+          const gesture = fingerPair(pointers.current, pixelRef.current);
+          const start = pinch.current;
+          if (gesture && start) {
+            remember(session, gestureViewport(start.viewport, start, gesture.midX, gesture.midY, gesture.distance), onChange, saveTimer);
+          }
           return;
         }
         if (axisDrag.current && pixelRef.current) {
@@ -229,6 +222,11 @@ export function CanvasView({
       onPointerUp={(event) => {
         pointers.current.delete(event.pointerId);
         if (pointers.current.size < 2) pinch.current = null;
+        if (hands.current) {
+          if (pointers.current.size === 0) hands.current = false;
+          onChange();
+          return;
+        }
         const draggedAxis = axisDrag.current !== null;
         axisDrag.current = null;
         setAxisCursor(null);
@@ -248,6 +246,7 @@ export function CanvasView({
       onPointerCancel={() => {
         pointers.current.clear();
         pinch.current = null;
+        hands.current = false;
         panning.current = false;
         axisDrag.current = null;
         setAxisCursor(null);
@@ -269,6 +268,21 @@ export function CanvasView({
       </div>
     </div>
   );
+}
+
+function fingerPair(
+  pointers: Map<number, { x: number; y: number }>,
+  canvas: HTMLCanvasElement | null,
+): { midX: number; midY: number; distance: number } | null {
+  if (!canvas || pointers.size < 2) return null;
+  const [a, b] = [...pointers.values()];
+  if (!a || !b) return null;
+  const rect = canvas.getBoundingClientRect();
+  return {
+    midX: (a.x + b.x) / 2 - rect.left,
+    midY: (a.y + b.y) / 2 - rect.top,
+    distance: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+  };
 }
 
 function editingTarget(target: EventTarget | null): boolean {

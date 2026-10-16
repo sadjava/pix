@@ -44,7 +44,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [pngChecker, setPngChecker] = useState(false);
   const [pngScale, setPngScale] = useState(8);
   const [pngBorder, setPngBorder] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(() => window.matchMedia('(min-width: 1201px)').matches);
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const [axisLocked, setAxisLocked] = useState(false);
@@ -144,18 +143,14 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
     };
     saveView();
   };
+  const live = session.liveSelection();
 
   return (
-    <div className={`editor${toolsOpen ? '' : ' is-tools-hidden'}${panelOpen ? ' panel-open' : ''}`}>
+    <div className={`editor${panelOpen ? ' panel-open' : ''}`}>
       <header className="topbar">
         <button type="button" className="icon-btn" aria-label={ru.back} title={ru.back} onClick={() => leave(session, queue, onBack)}>
           <Icon name="chevronLeft" />
         </button>
-        {!toolsOpen ? (
-          <button type="button" className="icon-btn" aria-label={ru.expandTools} title={ru.expandTools} onClick={() => setToolsOpen(true)}>
-            <Icon name="chevronRight" />
-          </button>
-        ) : null}
         <strong className="project-name">{record.name}</strong>
         <span className="project-size">{session.doc.width} × {session.doc.height}</span>
         <span className="top-spacer" />
@@ -185,7 +180,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           <Icon name="panel" />
         </button>
       </header>
-      <nav className="tools" aria-label={ru.tools} inert={!toolsOpen}>
+      <nav className="tools" aria-label={ru.tools}>
         {tools.map((tool) => (
           <button
             key={tool.id}
@@ -199,10 +194,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
             <Icon name={tool.icon} />
           </button>
         ))}
-        <span className="tool-spacer" />
-        <button type="button" className="icon-btn" aria-label={ru.collapseTools} title={ru.collapseTools} onClick={() => setToolsOpen(false)}>
-          <Icon name="chevronLeft" />
-        </button>
       </nav>
       <div className="stage">
         <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} />
@@ -272,24 +263,13 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           </p>
         </section>
         <section className="group" aria-label={ru.selection}>
-          {session.selection ? <p className="note">{selectionSizeLabel(session.selection)}</p> : null}
+          {live ? <p className="note">{selectionSizeLabel(live)}</p> : null}
           {session.notice ? <p className="note">{session.notice}</p> : null}
           {session.pasteClipped ? <p className="note">{ru.clipped}</p> : null}
           <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} disabled={!session.selection} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
             <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} disabled={!session.clipboard} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
           </div>
-          {session.pasteOrigin ? (
-            <div className="icon-row">
-              <button type="button" className="icon-btn" aria-label={ru.nudgeLeft} onClick={() => { session.movePaste(-1, 0); refresh(); }}><Icon name="chevronLeft" /></button>
-              <button type="button" className="icon-btn" aria-label={ru.nudgeRight} onClick={() => { session.movePaste(1, 0); refresh(); }}><Icon name="chevronRight" /></button>
-              <button type="button" className="icon-btn" aria-label={ru.nudgeUp} onClick={() => { session.movePaste(0, -1); refresh(); }}><Icon name="chevronUp" /></button>
-              <button type="button" className="icon-btn" aria-label={ru.nudgeDown} onClick={() => { session.movePaste(0, 1); refresh(); }}><Icon name="chevronDown" /></button>
-              <button type="button" className="icon-btn" aria-label={ru.pasteConfirm} title={ru.pasteConfirm} onClick={() => { session.confirmPaste(); refresh(); }}><Icon name="check" /></button>
-              <button type="button" className="icon-btn" aria-label={ru.cancel} title={ru.cancel} onClick={() => { session.cancelPaste(); refresh(); }}><Icon name="x" /></button>
-            </div>
-          ) : null}
-          {session.pasteOrigin ? <p className="note">{ru.pasteHint}</p> : null}
         </section>
         <section className="group" aria-label={ru.palette}>
           <div className="palette" aria-label={ru.palette}>

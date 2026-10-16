@@ -199,6 +199,11 @@ export class EditorSession {
     if (this.gesture?.kind === 'stroke') this.checkpointStroke();
   }
 
+  liveSelection(): SelectionRect | null {
+    if (this.gesture?.kind === 'select') return normalizeSelection(this.gesture.anchor, this.gesture.current);
+    return this.selection;
+  }
+
   preview(): GesturePreview | null {
     if (!this.gesture) return null;
     if (this.gesture.kind === 'shape') {

@@ -176,7 +176,6 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 .editor {
   --rail: var(--tool-rail);
   --side: var(--panel);
-  --tools: 0px;
   height: 100%;
   display: grid;
   grid-template-columns: var(--rail) minmax(0, 1fr) var(--side);
@@ -190,7 +189,6 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 
 .editor input, .editor textarea, .editor select { user-select: text; }
 
-.editor.is-tools-hidden { --rail: 0px; }
 .editor:not(.panel-open) { --side: 0px; }
 
 .topbar {
@@ -259,16 +257,13 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
   color: var(--wool);
   overflow: auto;
   touch-action: pan-y;
+  padding-bottom: max(var(--space-2), env(safe-area-inset-bottom));
 }
-
-.editor.is-tools-hidden .tools { visibility: hidden; }
 
 .tool[aria-pressed="true"] {
   background: var(--indigo);
   color: var(--wool);
 }
-
-.tool-spacer { flex: 1; }
 
 .stage {
   grid-row: 2;
@@ -540,44 +535,30 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 
 @media (max-width: 1200px) {
   .editor {
-    --rail: 0px;
     --side: 0px;
-    --tools: calc(64px + env(safe-area-inset-bottom));
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: var(--bar) minmax(0, 1fr) var(--tools);
+    grid-template-columns: var(--rail) minmax(0, 1fr);
   }
-
-  .editor.is-tools-hidden { --tools: 0px; }
-
-  .tools {
-    grid-row: 3;
-    grid-column: 1;
-    flex-direction: row;
-    width: 100%;
-    height: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    touch-action: pan-x;
-    padding: 6px max(6px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
-  }
-
-  .editor.is-tools-hidden .tools { display: none; }
-
-  .stage { grid-row: 2; grid-column: 1; }
 
   .side {
     position: absolute;
     z-index: 5;
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
     top: var(--bar);
     right: 0;
-    bottom: var(--tools);
-    width: min(300px, 92vw);
+    bottom: 0;
+    width: min(300px, calc(100% - var(--rail)));
     box-shadow: -8px 0 24px rgba(28, 22, 20, 0.16);
   }
 
   .editor.panel-open .scrim { display: block; }
 
-  .scrim { bottom: var(--tools); }
+  .scrim {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    left: var(--rail);
+    bottom: 0;
+  }
 
   .create, .auth, .diagnostics { flex-direction: column; align-items: stretch; }
   .gallery-head h1 { font-size: 28px; }

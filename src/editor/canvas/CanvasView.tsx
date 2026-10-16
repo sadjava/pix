@@ -179,6 +179,15 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (event.button === 1 || space.current) {
+          panning.current = true;
+          lastPan.current = { x: event.clientX, y: event.clientY };
+          return;
+        }
+        if (session.pasteOrigin) {
+          pasteDrag.current = cellAt(event);
+          return;
+        }
         const hit = axisLocked ? null : axisHit(session, event.clientX, event.clientY, pixelRef.current);
         if (hit) {
           axisDrag.current = hit;
@@ -187,13 +196,9 @@ export function CanvasView({
           onChange();
           return;
         }
-        if (event.button === 1 || session.tool === 'pan' || space.current) {
+        if (session.tool === 'pan') {
           panning.current = true;
           lastPan.current = { x: event.clientX, y: event.clientY };
-          return;
-        }
-        if (session.pasteOrigin) {
-          pasteDrag.current = cellAt(event);
           return;
         }
         session.pointerDown(cellAt(event));
@@ -259,6 +264,7 @@ export function CanvasView({
         }
         if (pasteDrag.current) {
           pasteDrag.current = null;
+          session.confirmPaste();
           onChange();
           return;
         }
@@ -385,12 +391,14 @@ function draw(
     strokeRect(overlayCtx, session.selection, viewport, '#243e66');
   }
   if (session.pasteOrigin && session.clipboard) {
-    strokeRect(
-      overlayCtx,
-      { x: session.pasteOrigin.x, y: session.pasteOrigin.y, width: session.clipboard.width, height: session.clipboard.height },
-      viewport,
-      '#b4334a',
-    );
+    const clip = session.clipboard;
+    overlayCtx.fillStyle = 'rgba(180, 51, 74, 0.45)';
+    for (let y = 0; y < clip.height; y += 1) {
+      for (let x = 0; x < clip.width; x += 1) {
+        if (clip.cells[y * clip.width + x] === 0) continue;
+        overlayCtx.fillRect(viewport.panX + (session.pasteOrigin.x + x) * cellPx, viewport.panY + (session.pasteOrigin.y + y) * cellPx, cellPx, cellPx);
+      }
+    }
   }
   drawAxes(overlayCtx, session, viewport, dragging);
 }
@@ -407,8 +415,8 @@ function drawGrid(
   ctx.strokeRect(viewport.panX + 0.5, viewport.panY + 0.5, Math.max(0, drawW - 1), Math.max(0, drawH - 1));
   if (!session.doc.gridVisible) return;
   const cellPx = viewport.cellSize * viewport.scale;
-  // ponytail: every 10th line below 6px per cell. A mip-style grid would replace the fixed step.
-  const step = cellPx >= 6 ? 1 : cellPx * 10 >= 3 ? 10 : 0;
+  // ponytail: every 8th line below 6px per cell. A mip-style grid would replace the fixed step.
+  const step = cellPx >= 6 ? 1 : cellPx * 8 >= 3 ? 8 : 0;
   if (step === 0) return;
   ctx.beginPath();
   for (let x = 0; x <= session.doc.width; x += step) {

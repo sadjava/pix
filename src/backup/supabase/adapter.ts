@@ -1,5 +1,5 @@
 import type { PaletteColor, SymmetrySettings } from '../../model/types.ts';
-import type { RugRow, SyncTransport } from '../protocol.ts';
+import type { RugRef, RugRow, SyncTransport } from '../protocol.ts';
 
 export interface SupabaseConfig {
   url: string;
@@ -7,12 +7,29 @@ export interface SupabaseConfig {
   ownerId: string;
 }
 
-export async function createSupabaseTransport(config: SupabaseConfig): Promise<SyncTransport> {
+export interface SignedInUser {
+  id: string;
+  email: string;
+}
+
+let clientKey = '';
+let clientPromise: Promise<import('@supabase/supabase-js').SupabaseClient> | null = null;
+
+async function clientFor(config: { url: string; publishableKey: string }) {
   assertPublishable(config.publishableKey);
-  const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(config.url, config.publishableKey, {
-    auth: { persistSession: true, autoRefreshToken: true },
-  });
+  const key = `${config.url}\n${config.publishableKey}`;
+  if (!clientPromise || clientKey !== key) {
+    clientKey = key;
+    const { createClient } = await import('@supabase/supabase-js');
+    clientPromise = Promise.resolve(createClient(config.url, config.publishableKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+    }));
+  }
+  return clientPromise;
+}
+
+export async function createSupabaseTransport(config: SupabaseConfig): Promise<SyncTransport> {
+  const client = await clientFor(config);
   return {
     async upsert(row) {
       const { error } = await client.from('rugs').upsert(toRow(row), { onConflict: 'id' });
@@ -28,16 +45,39 @@ export async function createSupabaseTransport(config: SupabaseConfig): Promise<S
       if (error) throw new Error(error.message === 'JWT expired' ? 'auth' : 'network');
       return (data ?? []).map(fromRow);
     },
+    async listRefs() {
+      const { data, error } = await client.from('rugs').select('id, name, width, height, document_revision, updated_at').order('updated_at', { ascending: false });
+      if (error) throw new Error(error.message === 'JWT expired' ? 'auth' : 'network');
+      return (data ?? []).map(refFromRow);
+    },
+    async remove(projectId) {
+      const { error } = await client.from('rugs').delete().eq('id', projectId);
+      if (error) throw new Error(error.code === '42501' ? 'forbidden' : 'network');
+    },
   };
 }
 
-export async function signIn(config: SupabaseConfig, email: string, password: string): Promise<string | null> {
+export async function signIn(config: SupabaseConfig, email: string, password: string): Promise<SignedInUser | null> {
   if (config.publishableKey.startsWith('sb_secret_')) return null;
-  const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(config.url, config.publishableKey);
+  const client = await clientFor(config);
   const { data, error } = await client.auth.signInWithPassword({ email, password });
   if (error || !data.user) return null;
-  return data.user.id;
+  return { id: data.user.id, email: data.user.email ?? email };
+}
+
+export async function currentSession(config: { url: string; publishableKey: string }): Promise<SignedInUser | null> {
+  if (config.publishableKey.startsWith('sb_secret_')) return null;
+  const client = await clientFor(config);
+  const { data } = await client.auth.getSession();
+  const user = data.session?.user;
+  if (!user) return null;
+  return { id: user.id, email: user.email ?? '' };
+}
+
+export async function signOut(config: { url: string; publishableKey: string }): Promise<void> {
+  if (config.publishableKey.startsWith('sb_secret_')) return;
+  const client = await clientFor(config);
+  await client.auth.signOut();
 }
 
 function assertPublishable(key: string): void {
@@ -61,6 +101,17 @@ function toRow(row: RugRow): Record<string, unknown> {
     checker_block: row.checkerBlock,
     symmetry: row.symmetry,
     content_hash: row.contentHash,
+  };
+}
+
+function refFromRow(row: Record<string, unknown>): RugRef {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    width: Number(row.width),
+    height: Number(row.height),
+    documentRevision: Number(row.document_revision),
+    updatedAt: String(row.updated_at),
   };
 }
 

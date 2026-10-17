@@ -10,6 +10,69 @@ export interface SelectionRect {
   height: number;
 }
 
+export type SelectionHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
+
+/** Move one edge or corner. The opposite side stays put, and the rect stays on the canvas. */
+export function resizeSelectionRect(
+  origin: SelectionRect,
+  handle: SelectionHandle,
+  cell: Point,
+  gridWidth: number,
+  gridHeight: number,
+): SelectionRect {
+  let x0 = origin.x;
+  let y0 = origin.y;
+  let x1 = origin.x + origin.width - 1;
+  let y1 = origin.y + origin.height - 1;
+  if (handle.includes('w')) x0 = cell.x;
+  if (handle.includes('e')) x1 = cell.x;
+  if (handle.includes('n')) y0 = cell.y;
+  if (handle.includes('s')) y1 = cell.y;
+  if (x0 > x1) [x0, x1] = [x1, x0];
+  if (y0 > y1) [y0, y1] = [y1, y0];
+  x0 = Math.max(0, Math.min(gridWidth - 1, x0));
+  x1 = Math.max(0, Math.min(gridWidth - 1, x1));
+  y0 = Math.max(0, Math.min(gridHeight - 1, y0));
+  y1 = Math.max(0, Math.min(gridHeight - 1, y1));
+  return { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+}
+
+/** Nearest-neighbor scale of a copied region. Cells left behind become empty. */
+export function scaleRegion(
+  cells: Uint16Array,
+  gridWidth: number,
+  gridHeight: number,
+  source: SelectionRect,
+  sourceCells: Uint16Array,
+  dest: SelectionRect,
+): CellPatch[] {
+  const after = new Map<number, number>();
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      const gx = source.x + x;
+      const gy = source.y + y;
+      if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
+      after.set(indexOf(gridWidth, gx, gy), 0);
+    }
+  }
+  for (let y = 0; y < dest.height; y += 1) {
+    for (let x = 0; x < dest.width; x += 1) {
+      const gx = dest.x + x;
+      const gy = dest.y + y;
+      if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
+      const u = Math.min(source.width - 1, Math.floor(((x + 0.5) * source.width) / dest.width));
+      const v = Math.min(source.height - 1, Math.floor(((y + 0.5) * source.height) / dest.height));
+      after.set(indexOf(gridWidth, gx, gy), sourceCells[v * source.width + u] ?? 0);
+    }
+  }
+  const patches: CellPatch[] = [];
+  for (const [index, value] of after) {
+    const before = cells[index] ?? 0;
+    if (before !== value) patches.push({ index, before, after: value });
+  }
+  return patches;
+}
+
 export function normalizeSelection(a: Point, b: Point): SelectionRect {
   const size = inclusiveSize(a, b);
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: size.width, height: size.height };

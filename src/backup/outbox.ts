@@ -113,18 +113,43 @@ export async function drainOutbox(
   }
 }
 
+const DELETED = 'deletedRugIds';
+
+export async function rememberDeleted(repo: ProjectRepository, id: string): Promise<void> {
+  const ids = new Set(await repo.readMeta<string[]>(DELETED) ?? []);
+  ids.add(id);
+  await repo.writeMeta(DELETED, [...ids]);
+}
+
+async function flushDeleted(repo: ProjectRepository, transport: SyncTransport): Promise<Set<string>> {
+  const ids = await repo.readMeta<string[]>(DELETED) ?? [];
+  const left: string[] = [];
+  for (const id of ids) {
+    try {
+      await transport.remove(id);
+    } catch {
+      left.push(id);
+    }
+  }
+  await repo.writeMeta(DELETED, left);
+  return new Set(left);
+}
+
 export async function syncAccount(
   repo: ProjectRepository,
   transport: SyncTransport,
   ownerId: string,
   now: string,
 ): Promise<void> {
+  const deleted = await flushDeleted(repo, transport);
   for (const project of await repo.list()) await enqueueBackup(repo, project);
   await drainOutbox(repo, transport, ownerId, now, true);
-  const remote = await transport.list();
+  const remote = await transport.listRefs();
   const local = new Set((await repo.list()).map((item) => item.id));
-  for (const row of remote) {
-    if (local.has(row.id)) continue;
+  for (const ref of remote) {
+    if (local.has(ref.id) || deleted.has(ref.id)) continue;
+    const row = await transport.get(ref.id);
+    if (!row) continue;
     const doc = await documentFromRow(row);
     if (!doc) continue;
     await repo.create({ id: row.id, name: row.name, width: row.width, height: row.height, now: row.updatedAt });

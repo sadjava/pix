@@ -11,6 +11,9 @@ import {
   extractRegion,
   moveRegion,
   normalizeSelection,
+  resizeSelectionRect,
+  scaleRegion,
+  type SelectionHandle,
   type SelectionRect,
 } from './selection/selection.ts';
 import { colorUsed, pickRecentColor, removeColor, slotOf } from './palette/palette.ts';
@@ -69,6 +72,11 @@ export class EditorSession {
   /** Square stamp edge, in cells. ponytail: capped at 8; a circle stamp would replace the square. */
   brushSize = 1;
   eraserSize = 1;
+  lineSize = 1;
+  /** Second tap on fill. The flooded cells become empty. */
+  fillErase = false;
+  /** Slot numbers, newest last. Not stored in the document. */
+  colorOrder: number[];
   selection: SelectionRect | null = null;
   clipboard: ClipboardPayload | null = null;
   pasteOrigin: Point | null = null;
@@ -84,10 +92,14 @@ export class EditorSession {
     this.history = history;
     this.revision = revision;
     this.now = now;
+    this.colorOrder = doc.palette.map((_, index) => index + 1).slice(-8);
+    const newest = this.colorOrder[this.colorOrder.length - 1];
+    if (newest && !this.colorOrder.includes(this.colorSlot)) this.colorSlot = newest;
   }
 
   setTool(tool: ToolId): void {
     this.cancelGesture();
+    if (tool !== this.tool) this.fillErase = false;
     this.tool = tool;
   }
 
@@ -96,10 +108,11 @@ export class EditorSession {
   }
 
   useColor(hex: string): void {
-    const picked = pickRecentColor(this.doc.palette, hex);
+    const picked = pickRecentColor(this.doc.palette, this.colorOrder, hex);
     if (!picked) return;
-    if (picked.palette !== this.doc.palette) this.setView({ palette: picked.palette });
+    this.colorOrder = picked.order;
     this.colorSlot = picked.slot;
+    if (picked.palette !== this.doc.palette) this.setView({ palette: picked.palette });
   }
 
   pointerDown(cell: Point | null): void {
@@ -110,6 +123,7 @@ export class EditorSession {
       if (slot !== 0) this.colorSlot = slot;
       return;
     }
+    if (this.tool !== 'select') this.selection = null;
     if (this.tool === 'fill') {
       this.fillAt(cell);
       return;
@@ -184,6 +198,7 @@ export class EditorSession {
   }
 
   cancelGesture(): void {
+    this.cancelScale();
     if (!this.gesture) return;
     if (this.gesture.kind === 'stroke') {
       const patches = [...this.gesture.patches.values()];
@@ -205,6 +220,15 @@ export class EditorSession {
   liveSelection(): SelectionRect | null {
     if (this.gesture?.kind === 'select') return normalizeSelection(this.gesture.anchor, this.gesture.current);
     return this.selection;
+  }
+
+  liveRectSize(): { width: number; height: number } | null {
+    const gesture = this.gesture;
+    if (!gesture || gesture.kind !== 'shape' || gesture.tool !== 'rect') return null;
+    return {
+      width: Math.abs(gesture.current.x - gesture.anchor.x) + 1,
+      height: Math.abs(gesture.current.y - gesture.anchor.y) + 1,
+    };
   }
 
   preview(): GesturePreview | null {
@@ -255,6 +279,57 @@ export class EditorSession {
     this.applyCommit('cut', patches);
   }
 
+  startScale(): void {
+    this.cancelScale();
+    const rect = this.selection;
+    if (!rect) return;
+    const cells = new Uint16Array(rect.width * rect.height);
+    for (let y = 0; y < rect.height; y += 1) {
+      for (let x = 0; x < rect.width; x += 1) {
+        const gx = rect.x + x;
+        const gy = rect.y + y;
+        cells[y * rect.width + x] = gx >= 0 && gy >= 0 && gx < this.doc.width && gy < this.doc.height
+          ? (this.doc.cells[gy * this.doc.width + gx] ?? 0)
+          : 0;
+      }
+    }
+    this.scaleSource = { rect, cells, patches: [] };
+  }
+
+  previewScale(handle: SelectionHandle, cell: Point): void {
+    const source = this.scaleSource;
+    if (!source) return;
+    applyPatches(this.doc.cells, source.patches, 'back');
+    const dest = resizeSelectionRect(source.rect, handle, cell, this.doc.width, this.doc.height);
+    const patches = scaleRegion(this.doc.cells, this.doc.width, this.doc.height, source.rect, source.cells, dest);
+    applyPatches(this.doc.cells, patches, 'forward');
+    source.patches = patches;
+    this.selection = dest;
+  }
+
+  commitScale(): void {
+    if (!this.scaleSource) return;
+    const patches = this.scaleSource.patches;
+    this.scaleSource = null;
+    if (patches.length === 0) return;
+    this.commit('scale', patches, true);
+  }
+
+  private scaleSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
+
+  private cancelScale(): void {
+    if (!this.scaleSource) return;
+    applyPatches(this.doc.cells, this.scaleSource.patches, 'back');
+    this.selection = this.scaleSource.rect;
+    this.scaleSource = null;
+  }
+
+  clearSelection(): void {
+    if (!this.selection) return;
+    const patches = clearRegion(this.doc.cells, this.doc.width, this.doc.height, this.selection);
+    this.applyCommit('clear', patches);
+  }
+
   beginPaste(): void {
     if (!this.clipboard) return;
     this.pasteOrigin = this.selection ? { x: this.selection.x, y: this.selection.y } : { x: 0, y: 0 };
@@ -269,6 +344,8 @@ export class EditorSession {
 
   confirmPaste(): void {
     if (!this.clipboard || !this.pasteOrigin) return;
+    const origin = this.pasteOrigin;
+    const clip = this.clipboard;
     const result = blitClipboard(
       this.doc.cells,
       this.doc.width,
@@ -282,6 +359,11 @@ export class EditorSession {
     if (result.clipped) this.notice = 'Часть выходит за холст';
     this.applyCommit('paste', result.patches);
     this.pasteOrigin = null;
+    const x0 = Math.max(0, Math.min(this.doc.width - 1, origin.x));
+    const y0 = Math.max(0, Math.min(this.doc.height - 1, origin.y));
+    const x1 = Math.max(x0, Math.min(this.doc.width - 1, origin.x + clip.width - 1));
+    const y1 = Math.max(y0, Math.min(this.doc.height - 1, origin.y + clip.height - 1));
+    this.selection = { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
   }
 
   cancelPaste(): void {
@@ -316,21 +398,15 @@ export class EditorSession {
     this.cancelGesture();
     this.doc = doc;
     this.selection = null;
+    this.colorOrder = doc.palette.map((_, index) => index + 1).slice(-8);
     this.revision += 1;
     this.persist('replace', [], false);
   }
 
   private stamp(cell: Point): Point[] {
     const size = this.gesture?.kind === 'stroke' && this.gesture.tool === 'eraser' ? this.eraserSize : this.brushSize;
-    if (this.gesture?.kind !== 'stroke' || size <= 1) return [cell];
-    const points: Point[] = [];
-    const half = Math.floor((size - 1) / 2);
-    for (let dy = 0; dy < size; dy += 1) {
-      for (let dx = 0; dx < size; dx += 1) {
-        points.push({ x: cell.x - half + dx, y: cell.y - half + dy });
-      }
-    }
-    return points;
+    if (this.gesture?.kind !== 'stroke') return [cell];
+    return square(cell, size);
   }
 
   private fillAt(seed: Point): void {
@@ -341,11 +417,12 @@ export class EditorSession {
         indexes.add(index);
       }
     }
+    const value = this.fillErase ? 0 : this.colorSlot;
     const patches: CellPatch[] = [];
     for (const index of indexes) {
       const before = this.doc.cells[index] ?? 0;
-      if (before === this.colorSlot) continue;
-      patches.push({ index, before, after: this.colorSlot });
+      if (before === value) continue;
+      patches.push({ index, before, after: value });
     }
     this.applyCommit('fill', patches);
   }
@@ -377,7 +454,7 @@ export class EditorSession {
   }
 
   private shapePoints(gesture: ShapeGesture): Point[] {
-    if (gesture.tool === 'line') return lineCells(gesture.anchor, gesture.current);
+    if (gesture.tool === 'line') return lineCells(gesture.anchor, gesture.current).flatMap((point) => square(point, this.lineSize));
     if (gesture.tool === 'circle') return circleCells(gesture.anchor, radiusOf(gesture.anchor, gesture.current));
     if (gesture.tool === 'rect') return rectOutline(gesture.anchor, gesture.current);
     return diamondCells(gesture.anchor, radiusOf(gesture.anchor, gesture.current));
@@ -420,6 +497,16 @@ export class EditorSession {
   }
 }
 
+function square(cell: Point, size: number): Point[] {
+  if (size <= 1) return [cell];
+  const half = Math.floor((size - 1) / 2);
+  const points: Point[] = [];
+  for (let dy = 0; dy < size; dy++) {
+    for (let dx = 0; dx < size; dx++) points.push({ x: cell.x - half + dx, y: cell.y - half + dy });
+  }
+  return points;
+}
+
 function inside(rect: SelectionRect, point: Point): boolean {
   return point.x >= rect.x && point.y >= rect.y && point.x < rect.x + rect.width && point.y < rect.y + rect.height;
 }
@@ -431,6 +518,6 @@ function rectPoints(rect: SelectionRect): Point[] {
   );
 }
 
-export function selectionSizeLabel(rect: SelectionRect): string {
+export function selectionSizeLabel(rect: { width: number; height: number }): string {
   return `${rect.width} × ${rect.height}`;
 }

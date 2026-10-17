@@ -24,4 +24,22 @@ export class MemoryTransport implements SyncTransport {
     if (this.authExpired) throw new Error('auth');
     return [...this.rows.values()].filter((row) => row.ownerId === this.actorId);
   }
+
+  async listRefs() {
+    return (await this.list()).map((row) => ({
+      id: row.id,
+      name: row.name,
+      width: row.width,
+      height: row.height,
+      documentRevision: row.documentRevision,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async remove(projectId: string): Promise<void> {
+    if (this.authExpired) throw new Error('auth');
+    const row = this.rows.get(projectId);
+    if (row && row.ownerId !== this.actorId) throw new Error('forbidden');
+    this.rows.delete(projectId);
+  }
 }

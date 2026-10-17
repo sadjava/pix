@@ -106,11 +106,37 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 
 .auth h2 { margin: 0; font-size: var(--text); }
 
+.gallery-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 .gallery-head h1 {
   margin: 0;
   font-size: 36px;
   font-weight: 650;
   letter-spacing: -0.03em;
+}
+
+.who {
+  margin: 0;
+  max-width: min(280px, 46vw);
+  text-align: right;
+  font-size: var(--text-sm);
+}
+
+.who span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.who .check {
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
 .gallery-head p, .empty { margin-top: var(--space-1); }
@@ -351,6 +377,10 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
   color: var(--wool);
   border-radius: 999px;
   transform: translateY(-50%);
+}
+
+.size-pop[aria-pressed="true"] {
+  background: var(--indigo);
 }
 
 .size-pop input[type="range"] {

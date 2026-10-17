@@ -19,6 +19,7 @@ export type IconName =
   | 'chevronDown'
   | 'panel'
   | 'fit'
+  | 'zoom'
   | 'grid'
   | 'checker'
   | 'axisV'
@@ -115,6 +116,12 @@ const paths: Record<IconName, ReactNode> = {
       <path d="M16 3h3a2 2 0 0 1 2 2v3" />
       <path d="M21 16v3a2 2 0 0 1-2 2h-3" />
       <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+    </>
+  ),
+  zoom: (
+    <>
+      <circle cx="10" cy="10" r="6" />
+      <path d="m14.5 14.5 5 5M10 7.5v5M7.5 10h5" />
     </>
   ),
   grid: (

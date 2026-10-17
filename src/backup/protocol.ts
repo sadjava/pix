@@ -19,10 +19,22 @@ export interface RugRow {
   contentHash: string;
 }
 
+/** Enough to notice a remote rug without downloading its cells. */
+export interface RugRef {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  documentRevision: number;
+  updatedAt: string;
+}
+
 export interface SyncTransport {
   upsert(row: RugRow): Promise<void>;
   get(projectId: string): Promise<RugRow | null>;
   list(): Promise<RugRow[]>;
+  listRefs(): Promise<RugRef[]>;
+  remove(projectId: string): Promise<void>;
 }
 
 export type SyncDecision = 'push' | 'pull' | 'conflict' | 'skip';

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { RugRow } from '../backup/protocol.ts';
 import { documentFromRow } from '../backup/restore.ts';
-import { syncAccount } from '../backup/outbox.ts';
+import { rememberDeleted, syncAccount } from '../backup/outbox.ts';
 import { repository } from '../data/instance.ts';
 import { requestPersistentStorage, storageIsPersisted } from '../data/storage.ts';
 import { sizeDecision } from '../editor/canvas/grid.ts';
@@ -21,6 +21,9 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
   const [versions, setVersions] = useState<RugRow[]>([]);
   const [compare, setCompare] = useState('');
   const [backupOn, setBackupOn] = useState(false);
+  const [account, setAccount] = useState<{ id: string; email: string } | null | undefined>(undefined);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const configured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 
   async function reload(): Promise<void> {
@@ -28,57 +31,74 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
   }
 
   useEffect(() => {
-    void reload().then(() => syncIfEnabled(reload));
+    void reload();
     void repository.readMeta<boolean>('backupEnabled').then((value) => setBackupOn(Boolean(value)));
+    void restoreSession(setAccount, setBackupOn, reload);
   }, []);
 
   return (
     <main className="gallery">
       <header className="gallery-head">
-        <h1>{ru.galleryTitle}</h1>
-        <p>{ru.appName}</p>
+        <div>
+          <h1>{ru.galleryTitle}</h1>
+          <p>{ru.appName}</p>
+        </div>
+        {configured && account ? (
+          <div className="who">
+            <span title={account.email}>{account.email}</span>
+            <label className="check" title={ru.backupToggle}>
+              <input
+                type="checkbox"
+                checked={backupOn}
+                aria-label={ru.backupToggle}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setBackupOn(enabled);
+                  void repository.writeMeta('backupEnabled', enabled).then(() => {
+                    if (enabled) return syncIfEnabled(reload);
+                  });
+                }}
+              />
+              {ru.backupToggle}
+            </label>
+            <button type="button" onClick={() => void signOutAccount(setAccount)}>{ru.signOut}</button>
+          </div>
+        ) : null}
+        {configured && account === null ? (
+          <button type="button" onClick={() => setAuthOpen((open) => !open)}>{ru.signIn}</button>
+        ) : null}
       </header>
       {message ? <p className="warning">{message}</p> : null}
-      {configured ? (
+      {configured && account === null && authOpen ? (
         <form
           className="auth"
           onSubmit={(event) => {
             event.preventDefault();
-            void signIn(email, password, setMessage, setBackupOn, reload);
+            void signIn(email, password, setMessage, setAccount, setBackupOn, setAuthOpen, reload);
           }}
         >
-          <h2>{ru.signIn}</h2>
           <label>{ru.email}<input type="email" value={email} autoComplete="username" onChange={(event) => setEmail(event.target.value)} /></label>
           <label>{ru.password}<input type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} /></label>
           <button type="submit">{ru.signIn}</button>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={backupOn}
-              onChange={(event) => {
-                const enabled = event.target.checked;
-                setBackupOn(enabled);
-                void repository.writeMeta('backupEnabled', enabled).then(() => {
-                  if (enabled) return syncIfEnabled(reload);
-                });
-              }}
-            />
-            {ru.backupToggle}
-          </label>
         </form>
-      ) : <p>{ru.backupOff}</p>}
-      <form
-        className="create"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void createProject(name, width, height, setMessage, reload);
-        }}
-      >
-        <label>{ru.name}<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label>{ru.width}<input type="number" min={1} max={4000} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
-        <label>{ru.height}<input type="number" min={1} max={4000} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
-        <button type="submit">{ru.create}</button>
-      </form>
+      ) : null}
+      {configured ? null : <p>{ru.backupOff}</p>}
+      {createOpen ? (
+        <form
+          className="create"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void createProject(name, width, height, setMessage, setCreateOpen, reload);
+          }}
+        >
+          <label>{ru.name}<input value={name} onChange={(event) => setName(event.target.value)} /></label>
+          <label>{ru.width}<input type="number" min={1} max={4000} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
+          <label>{ru.height}<input type="number" min={1} max={4000} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
+          <button type="submit">{ru.create}</button>
+        </form>
+      ) : (
+        <button type="button" onClick={() => setCreateOpen(true)}>{ru.create}</button>
+      )}
       {projects.length === 0 ? <p className="empty">{ru.empty}</p> : null}
       <ul className="shelf">
         {projects.map((project) => (
@@ -152,6 +172,7 @@ async function createProject(
   width: number,
   height: number,
   setMessage: (value: string | null) => void,
+  setCreateOpen: (value: boolean) => void,
   reload: () => Promise<void>,
 ): Promise<void> {
   const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
@@ -163,6 +184,7 @@ async function createProject(
   if (decision === 'confirm' && !window.confirm(ru.largeCanvas)) return;
   await repository.create({ name, width, height });
   setMessage(null);
+  setCreateOpen(false);
   await reload();
 }
 
@@ -174,10 +196,11 @@ async function rename(project: ProjectRecord, reload: () => Promise<void>): Prom
 }
 
 async function remove(project: ProjectRecord, reload: () => Promise<void>): Promise<void> {
-  const agreed = window.confirm(project.lastCloudBackupAt ? ru.keepCloud : ru.noCloud);
-  if (!agreed) return;
+  if (!window.confirm(ru.deleteRug)) return;
   await repository.remove(project.id);
+  await rememberDeleted(repository, project.id);
   await reload();
+  await syncIfEnabled(reload);
 }
 
 async function showStorage(setStorageText: (value: string) => void): Promise<void> {
@@ -186,25 +209,67 @@ async function showStorage(setStorageText: (value: string) => void): Promise<voi
   setStorageText(persisted || granted ? ru.persistOn : ru.persistOff);
 }
 
+async function restoreSession(
+  setAccount: (user: { id: string; email: string } | null) => void,
+  setBackupOn: (value: boolean) => void,
+  reload: () => Promise<void>,
+): Promise<void> {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !publishableKey) {
+    setAccount(null);
+    return;
+  }
+  const { currentSession } = await import('../backup/supabase/adapter.ts');
+  let user: { id: string; email: string } | null = null;
+  try {
+    user = await currentSession({ url, publishableKey });
+  } catch {
+    user = null;
+  }
+  setAccount(user);
+  if (!user) return;
+  await repository.writeMeta('backupUserId', user.id);
+  const enabled = await repository.readMeta<boolean>('backupEnabled');
+  if (enabled) {
+    setBackupOn(true);
+    await syncIfEnabled(reload);
+  }
+}
+
+async function signOutAccount(setAccount: (user: null) => void): Promise<void> {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !publishableKey) return;
+  const { signOut } = await import('../backup/supabase/adapter.ts');
+  await signOut({ url, publishableKey });
+  await repository.writeMeta('backupUserId', null);
+  setAccount(null);
+}
+
 async function signIn(
   email: string,
   password: string,
   setMessage: (value: string | null) => void,
+  setAccount: (user: { id: string; email: string } | null) => void,
   setBackupOn: (value: boolean) => void,
+  setAuthOpen: (value: boolean) => void,
   reload: () => Promise<void>,
 ): Promise<void> {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !publishableKey) return;
   const { signIn: signInUser } = await import('../backup/supabase/adapter.ts');
-  const userId = await signInUser({ url, publishableKey, ownerId: 'pending' }, email, password);
-  if (!userId) {
+  const user = await signInUser({ url, publishableKey, ownerId: 'pending' }, email, password);
+  if (!user) {
     setMessage(ru.signInFailed);
     return;
   }
-  await repository.writeMeta('backupUserId', userId);
+  await repository.writeMeta('backupUserId', user.id);
   await repository.writeMeta('backupEnabled', true);
+  setAccount(user);
   setBackupOn(true);
+  setAuthOpen(false);
   setMessage(null);
   await syncIfEnabled(reload);
 }

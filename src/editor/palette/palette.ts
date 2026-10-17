@@ -12,15 +12,35 @@ export function defaultPalette(): PaletteColor[] {
   return [{ id: 'ink', name: 'Чернь', hex: '#1a1614' }];
 }
 
-/** Recent colors, newest at the end. ponytail: stops at 24; drop the oldest unused entry if a rug needs more. */
-export function pickRecentColor(palette: PaletteColor[], hex: string): { palette: PaletteColor[]; slot: number } | null {
+const RECENT_COLORS = 8;
+
+/**
+ * Recent colors, newest at the end of `order` (slot numbers).
+ * ponytail: the list stops at 8. A new color overwrites the oldest slot's hex, so cell numbers stay put.
+ */
+export function pickRecentColor(
+  palette: PaletteColor[],
+  order: readonly number[],
+  hex: string,
+): { palette: PaletteColor[]; order: number[]; slot: number } | null {
   const normalized = normalizeHex(hex);
   if (!normalized) return null;
   const existing = palette.findIndex((color) => color.hex === normalized);
-  if (existing >= 0) return { palette, slot: slotOf(existing) };
-  if (palette.length >= 24) return null;
-  const next = [...palette, { id: crypto.randomUUID(), name: normalized, hex: normalized }];
-  return { palette: next, slot: slotOf(next.length - 1) };
+  if (existing >= 0) {
+    const slot = slotOf(existing);
+    return { palette, order: [...order.filter((item) => item !== slot), slot].slice(-RECENT_COLORS), slot };
+  }
+  if (palette.length < RECENT_COLORS) {
+    const next = [...palette, { id: crypto.randomUUID(), name: normalized, hex: normalized }];
+    const slot = slotOf(next.length - 1);
+    return { palette: next, order: [...order, slot].slice(-RECENT_COLORS), slot };
+  }
+  const oldest = order[0] ?? 1;
+  const index = paletteIndexOf(oldest);
+  const current = palette[index];
+  if (!current) return null;
+  const next = palette.map((color, i) => (i === index ? { ...color, name: normalized, hex: normalized } : color));
+  return { palette: next, order: [...order.slice(1), oldest], slot: oldest };
 }
 
 export function slotOf(paletteIndex: number): number {

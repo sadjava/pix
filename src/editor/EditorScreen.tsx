@@ -8,12 +8,11 @@ import { resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { CanvasView } from './canvas/CanvasView.tsx';
 import { EditorSession as Session } from './session.ts';
 import { selectionSizeLabel } from './session.ts';
-import { slotOf } from './palette/palette.ts';
 import { ru } from '../i18n/ru.ts';
 import { pngBytes } from '../export/png.ts';
 import { exportProjectFile } from '../export/json.ts';
 import { enqueueBackup, drainOutbox } from '../backup/outbox.ts';
-import { nudgeAxis, snapAxis } from './canvas/coords.ts';
+import { snapAxis } from './canvas/coords.ts';
 import { axisLabel } from './symmetry/axisLabel.ts';
 import { Icon, type IconName } from './icons.tsx';
 
@@ -48,7 +47,9 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const [axisLocked, setAxisLocked] = useState(false);
   const [draftHex, setDraftHex] = useState<string | null>(null);
-  const [sizeFor, setSizeFor] = useState<{ tool: 'pencil' | 'eraser'; top: number } | null>(null);
+  const [sizeFor, setSizeFor] = useState<{ tool: 'pencil' | 'eraser' | 'line'; top: number } | null>(null);
+  const [fillPop, setFillPop] = useState<number | null>(null);
+  const colorTimer = useRef(0);
   const refresh = () => setFrame((value) => value + 1);
 
   useEffect(() => {
@@ -143,6 +144,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
     };
     saveView();
   };
+  const rectSize = session.liveRectSize();
   const live = session.liveSelection();
 
   return (
@@ -190,7 +192,13 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
             title={tool.label}
             aria-pressed={session.tool === tool.id}
             onClick={(event) => {
-              const sized = tool.id === 'pencil' || tool.id === 'eraser' ? tool.id : null;
+              if (tool.id === 'fill' && session.tool === 'fill') {
+                const box = event.currentTarget.getBoundingClientRect();
+                setFillPop((current) => current === null ? box.top + box.height / 2 : null);
+                setSizeFor(null);
+                return;
+              }
+              const sized = tool.id === 'pencil' || tool.id === 'eraser' || tool.id === 'line' ? tool.id : null;
               if (sized && session.tool === sized) {
                 const box = event.currentTarget.getBoundingClientRect();
                 const top = box.top + box.height / 2;
@@ -199,6 +207,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
               }
               session.setTool(tool.id);
               setSizeFor(null);
+              setFillPop(null);
               refresh();
             }}
           >
@@ -212,17 +221,31 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
             type="range"
             min={1}
             max={8}
-            aria-label={sizeFor.tool === 'eraser' ? ru.eraserSize : ru.brushSize}
-            value={sizeFor.tool === 'eraser' ? session.eraserSize : session.brushSize}
+            aria-label={sizeFor.tool === 'eraser' ? ru.eraserSize : sizeFor.tool === 'line' ? ru.lineSize : ru.brushSize}
+            value={toolSize(session, sizeFor.tool)}
             onChange={(event) => {
               const size = Number(event.target.value);
               if (sizeFor.tool === 'eraser') session.eraserSize = size;
+              else if (sizeFor.tool === 'line') session.lineSize = size;
               else session.brushSize = size;
               refresh();
             }}
           />
-          <span>{sizeFor.tool === 'eraser' ? session.eraserSize : session.brushSize}</span>
+          <span>{toolSize(session, sizeFor.tool)}</span>
         </label>
+      ) : null}
+      {fillPop !== null ? (
+        <button
+          type="button"
+          className="size-pop icon-btn"
+          style={{ top: fillPop }}
+          aria-pressed={session.fillErase}
+          aria-label={ru.fillErase}
+          title={ru.fillErase}
+          onClick={() => { session.fillErase = !session.fillErase; refresh(); }}
+        >
+          <Icon name="trash" />
+        </button>
       ) : null}
       <div className="stage">
         <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} />
@@ -276,12 +299,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
             </button>
           </div>
           <div className="icon-row">
-            <button type="button" className="icon-btn" aria-label={ru.nudgeLeft} title={ru.nudgeLeft} disabled={axisLocked} onClick={() => nudge(session, 'axisX2', -1, axisSnap, saveView)}><Icon name="chevronLeft" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.nudgeRight} title={ru.nudgeRight} disabled={axisLocked} onClick={() => nudge(session, 'axisX2', 1, axisSnap, saveView)}><Icon name="chevronRight" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.nudgeUp} title={ru.nudgeUp} disabled={axisLocked} onClick={() => nudge(session, 'axisY2', -1, axisSnap, saveView)}><Icon name="chevronUp" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.nudgeDown} title={ru.nudgeDown} disabled={axisLocked} onClick={() => nudge(session, 'axisY2', 1, axisSnap, saveView)}><Icon name="chevronDown" /></button>
-          </div>
-          <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.snapEdge} title={ru.snapEdge} aria-pressed={axisSnap === 'edge'} disabled={axisLocked} onClick={() => chooseSnap('edge')}><Icon name="snapEdge" /></button>
             <button type="button" className="icon-btn" aria-label={ru.snapCenter} title={ru.snapCenter} aria-pressed={axisSnap === 'center'} disabled={axisLocked} onClick={() => chooseSnap('center')}><Icon name="snapCenter" /></button>
             <button type="button" className="icon-btn" aria-label={ru.centerAxes} title={ru.centerAxes} aria-pressed={axesCentered(session, axisSnap)} disabled={axisLocked} onClick={() => centerAxes(session, axisSnap, saveView)}><Icon name="crosshair" /></button>
@@ -291,12 +308,13 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           </p>
         </section>
         <section className="group" aria-label={ru.selection}>
-          {live ? <p className="note">{selectionSizeLabel(live)}</p> : null}
+          {rectSize ? <p className="note">{selectionSizeLabel(rectSize)}</p> : live ? <p className="note">{selectionSizeLabel(live)}</p> : null}
           {session.notice ? <p className="note">{session.notice}</p> : null}
           {session.pasteClipped ? <p className="note">{ru.clipped}</p> : null}
           <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} disabled={!session.selection} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
             <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} disabled={!session.clipboard} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.clearSelection} title={ru.clearSelection} disabled={!session.selection} onClick={() => { session.clearSelection(); refresh(); }}><Icon name="trash" /></button>
           </div>
         </section>
         <section className="group" aria-label={ru.palette}>
@@ -306,36 +324,34 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
                 type="color"
                 aria-label={ru.pickColor}
                 value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614'}
-                onChange={(event) => setDraftHex(event.target.value)}
+                onChange={(event) => {
+                  const hex = event.target.value;
+                  setDraftHex(hex);
+                  window.clearTimeout(colorTimer.current);
+                  colorTimer.current = window.setTimeout(() => {
+                    session.useColor(hex);
+                    setDraftHex(null);
+                    refresh();
+                  }, 250);
+                }}
               />
             </label>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label={ru.addColor}
-              title={ru.addColor}
-              disabled={!draftHex}
-              onClick={() => {
-                if (!draftHex) return;
-                session.useColor(draftHex);
-                setDraftHex(null);
-                refresh();
-              }}
-            >
-              <Icon name="check" />
-            </button>
-            {session.doc.palette.map((color, index) => (
-              <button
-                key={color.id}
-                type="button"
-                className="swatch"
-                style={{ background: color.hex }}
-                aria-label={color.hex}
-                title={color.hex}
-                aria-pressed={session.colorSlot === slotOf(index)}
-                onClick={() => { session.setColorSlot(slotOf(index)); refresh(); }}
-              />
-            ))}
+            {session.colorOrder.map((slot) => {
+              const color = session.doc.palette[slot - 1];
+              if (!color) return null;
+              return (
+                <button
+                  key={color.id}
+                  type="button"
+                  className="swatch"
+                  style={{ background: color.hex }}
+                  aria-label={color.hex}
+                  title={color.hex}
+                  aria-pressed={session.colorSlot === slot}
+                  onClick={() => { session.setColorSlot(slot); refresh(); }}
+                />
+              );
+            })}
           </div>
         </section>
         <section className="group" aria-label={ru.project}>
@@ -365,8 +381,23 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
 }
 
 function ResizeForm({ session, onDone }: { session: EditorSession; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(session.doc.width);
   const [height, setHeight] = useState(session.doc.height);
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setWidth(session.doc.width);
+          setHeight(session.doc.height);
+          setOpen(true);
+        }}
+      >
+        {ru.applySize}
+      </button>
+    );
+  }
   return (
     <form
       onSubmit={(event) => {
@@ -378,30 +409,23 @@ function ResizeForm({ session, onDone }: { session: EditorSession; onDone: () =>
         if (resized.cropped && !window.confirm(ru.crop)) return;
         if (decision === 'confirm' && !window.confirm(ru.largeCanvas)) return;
         session.replaceDocument(resized.doc);
+        setOpen(false);
         onDone();
       }}
     >
       <div className="icon-row">
         <input className="mini" type="number" min={1} max={4000} aria-label={ru.width} title={ru.width} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
         <input className="mini" type="number" min={1} max={4000} aria-label={ru.height} title={ru.height} value={height} onChange={(event) => setHeight(Number(event.target.value))} />
-        <button type="submit" className="icon-btn" aria-label={ru.applySize} title={ru.applySize}><Icon name="check" /></button>
+        <button type="submit" className="icon-btn" aria-label={ru.confirm} title={ru.confirm}><Icon name="check" /></button>
       </div>
     </form>
   );
 }
 
-function nudge(
-  session: EditorSession,
-  key: 'axisX2' | 'axisY2',
-  direction: number,
-  mode: 'center' | 'edge',
-  done: () => void,
-): void {
-  const edge = key === 'axisX2' ? session.doc.width : session.doc.height;
-  const snapped = snapAxis(session.doc.symmetry[key], mode);
-  const next = clampAxis(snapAxis(nudgeAxis(snapped, direction * 2, edge), mode), edge);
-  session.doc.symmetry = { ...session.doc.symmetry, [key]: next };
-  done();
+function toolSize(session: EditorSession, tool: 'pencil' | 'eraser' | 'line'): number {
+  if (tool === 'eraser') return session.eraserSize;
+  if (tool === 'line') return session.lineSize;
+  return session.brushSize;
 }
 
 function axesCentered(session: EditorSession, mode: 'center' | 'edge'): boolean {

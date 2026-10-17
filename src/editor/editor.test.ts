@@ -8,7 +8,7 @@ import { EditorSession } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
 import { circleCells, diamondCells, rectOutline } from './tools/shapes.ts';
-import { normalizeSelection } from './selection/selection.ts';
+import { normalizeSelection, resizeSelectionRect } from './selection/selection.ts';
 import { CHECKPOINT_MS } from '../model/types.ts';
 
 function session(width = 8, height = 8, now = () => 0): EditorSession {
@@ -133,6 +133,19 @@ describe('pencil, eraser, fill, picker', () => {
     expect(broad.history.undo).toHaveLength(1);
     broad.undo();
     expect(broad.doc.cells[0]).toBe(0);
+    const wipe = session(3, 3);
+    wipe.doc.cells[0] = 1;
+    wipe.doc.cells[1] = 1;
+    wipe.setTool('fill');
+    wipe.fillErase = true;
+    wipe.pointerDown({ x: 0, y: 0 });
+    expect(wipe.doc.cells[0]).toBe(0);
+    expect(wipe.doc.cells[1]).toBe(0);
+    expect(wipe.doc.cells[3]).toBe(0);
+    wipe.setTool('pencil');
+    expect(wipe.fillErase).toBe(false);
+    wipe.setTool('fill');
+    expect(wipe.fillErase).toBe(false);
   });
 
   it('picks the color under the pointer', () => {
@@ -210,6 +223,36 @@ describe('shapes', () => {
     expect(editor.doc.cells[3]).toBe(0);
   });
 
+  it('drops the selection when drawing starts and clears it on request', () => {
+    const editor = session();
+    editor.pointerDown({ x: 1, y: 1 });
+    editor.pointerUp();
+    editor.selection = { x: 1, y: 1, width: 1, height: 1 };
+    editor.clearSelection();
+    expect(editor.doc.cells[1 * 8 + 1]).toBe(0);
+    expect(editor.selection).toEqual({ x: 1, y: 1, width: 1, height: 1 });
+    editor.pointerDown({ x: 2, y: 2 });
+    expect(editor.selection).toBeNull();
+    editor.pointerUp();
+  });
+
+  it('paints a straight line at the chosen thickness and reports the rectangle size', () => {
+    const editor = session();
+    editor.setTool('line');
+    editor.lineSize = 2;
+    editor.pointerDown({ x: 1, y: 1 });
+    editor.pointerMove({ x: 3, y: 1 });
+    editor.pointerUp();
+    expect(editor.doc.cells[1 * 8 + 1]).toBe(1);
+    expect(editor.doc.cells[2 * 8 + 1]).toBe(1);
+    expect(editor.doc.cells[1 * 8 + 4]).toBe(1);
+    editor.setTool('rect');
+    editor.pointerDown({ x: 0, y: 0 });
+    editor.pointerMove({ x: 3, y: 1 });
+    expect(editor.liveRectSize()).toEqual({ width: 4, height: 2 });
+    editor.pointerUp();
+  });
+
   it('covers degenerate circle, rectangle, and diamond', () => {
     expect(circleCells({ x: 2, y: 2 }, 0)).toEqual([{ x: 2, y: 2 }]);
     expect(circleCells({ x: 2, y: 2 }, 1).map((point) => `${point.x},${point.y}`).sort()).toEqual(
@@ -230,15 +273,56 @@ describe('shapes', () => {
 describe('recent colors', () => {
   it('keeps an existing hex in place and appends a new one', () => {
     const palette = createDocument(2, 2).palette;
-    expect(pickRecentColor(palette, '#1a1614')).toMatchObject({ slot: 1, palette });
-    const added = pickRecentColor(palette, '#112233');
+    expect(pickRecentColor(palette, [1], '#1a1614')).toMatchObject({ slot: 1, palette });
+    const added = pickRecentColor(palette, [1], '#112233');
     expect(added?.slot).toBe(2);
     expect(added?.palette).toHaveLength(2);
     expect(added?.palette[0]).toBe(palette[0]);
   });
+
+  it('keeps the last 8 colors by overwriting the oldest swatch', () => {
+    let palette = createDocument(2, 2).palette;
+    let order = [1];
+    for (let i = 0; i < 7; i++) {
+      const picked = pickRecentColor(palette, order, `#01010${i}`);
+      expect(picked).not.toBeNull();
+      palette = picked!.palette;
+      order = picked!.order;
+    }
+    expect(palette).toHaveLength(8);
+    const dropped = pickRecentColor(palette, order, '#abcdef');
+    expect(dropped?.palette).toHaveLength(8);
+    expect(dropped?.palette[0]?.hex).toBe('#abcdef');
+    expect(dropped?.palette.some((color) => color.hex === '#1a1614')).toBe(false);
+    expect(dropped?.slot).toBe(1);
+    expect(dropped?.order[7]).toBe(1);
+  });
 });
 
 describe('selection', () => {
+  it('scales the stitches inside a selection when a side is dragged', () => {
+    const editor = session(8, 4);
+    editor.doc.cells[0] = 1;
+    editor.doc.cells[1] = 2;
+    editor.setTool('select');
+    editor.selection = { x: 0, y: 0, width: 2, height: 1 };
+    editor.startScale();
+    editor.previewScale('e', { x: 3, y: 0 });
+    editor.commitScale();
+    expect([...editor.doc.cells.slice(0, 4)]).toEqual([1, 1, 2, 2]);
+    expect(editor.selection).toEqual({ x: 0, y: 0, width: 4, height: 1 });
+    editor.undo();
+    expect([...editor.doc.cells.slice(0, 4)]).toEqual([1, 2, 0, 0]);
+  });
+
+  it('resizes a selection from an edge or a corner and stays on the canvas', () => {
+    const origin = { x: 2, y: 2, width: 4, height: 3 };
+    expect(resizeSelectionRect(origin, 'e', { x: 10, y: 2 }, 20, 20)).toEqual({ x: 2, y: 2, width: 9, height: 3 });
+    expect(resizeSelectionRect(origin, 'nw', { x: 0, y: 0 }, 20, 20)).toEqual({ x: 0, y: 0, width: 6, height: 5 });
+    expect(resizeSelectionRect(origin, 'w', { x: 8, y: 2 }, 20, 20)).toEqual({ x: 5, y: 2, width: 4, height: 3 });
+    expect(resizeSelectionRect(origin, 's', { x: 2, y: 100 }, 20, 12)).toEqual({ x: 2, y: 2, width: 4, height: 10 });
+  });
+
   it('counts inclusive cells, including 1×1 and a 10-wide run', () => {
     expect(normalizeSelection({ x: 4, y: 4 }, { x: 4, y: 4 })).toMatchObject({ width: 1, height: 1 });
     expect(normalizeSelection({ x: 10, y: 0 }, { x: 19, y: 3 })).toEqual({ x: 10, y: 0, width: 10, height: 4 });
@@ -268,6 +352,7 @@ describe('selection', () => {
     expect(editor.clipboard?.cells[0]).toBe(clip);
     expect(editor.doc.cells[1 * 12 + 1]).toBe(1);
     expect(editor.doc.cells[1 * 12 + 3]).toBe(1);
+    expect(editor.selection).toEqual({ x: 3, y: 1, width: 1, height: 1 });
   });
 
   it('maps colors by hex across palettes and clips past the edge', () => {

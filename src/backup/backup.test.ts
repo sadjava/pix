@@ -5,7 +5,7 @@ import { ProjectRepository } from '../data/repository.ts';
 import { emptyHistory } from '../editor/history/patches.ts';
 import { canReadBackup, canWriteBackup } from './rls.ts';
 import { MemoryTransport } from './memoryTransport.ts';
-import { drainOutbox, enqueueBackup } from './outbox.ts';
+import { drainOutbox, enqueueBackup, rememberDeleted, syncAccount } from './outbox.ts';
 import { applyBackupSuccess, decideSync } from './protocol.ts';
 import { documentFromRow, rugFromDocument } from './restore.ts';
 import { BackupScheduler, backoffMs } from './scheduler.ts';
@@ -107,6 +107,21 @@ describe('database sync', () => {
       false,
     );
     expect(older.syncState).toBe('pending');
+    repo.close();
+  });
+
+  it('deletes the cloud row and does not pull the rug back', async () => {
+    const repo = ProjectRepository.open('gone');
+    const created = await repo.create({ name: 'Уходит', width: 2, height: 2 });
+    const transport = new MemoryTransport();
+    await enqueueBackup(repo, created.record);
+    await drainOutbox(repo, transport, 'owner-1', '2026-10-16T00:00:00.000Z');
+    expect(transport.rows.size).toBe(1);
+    await repo.remove(created.record.id);
+    await rememberDeleted(repo, created.record.id);
+    await syncAccount(repo, transport, 'owner-1', '2026-10-16T00:02:00.000Z');
+    expect(transport.rows.size).toBe(0);
+    expect(await repo.list()).toHaveLength(0);
     repo.close();
   });
 

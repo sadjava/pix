@@ -7,6 +7,7 @@ import { axisLabel } from '../symmetry/axisLabel.ts';
 import { Icon } from '../icons.tsx';
 import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
+import type { SelectionHandle, SelectionRect } from '../selection/selection.ts';
 
 type AxisName = 'vertical' | 'horizontal';
 
@@ -31,6 +32,7 @@ export function CanvasView({
   const hands = useRef(false);
   const armed = useRef<{ x: number; y: number } | null>(null);
   const pasteDrag = useRef<{ x: number; y: number } | null>(null);
+  const resizeDrag = useRef<SelectionHandle | null>(null);
   const panning = useRef(false);
   const axisDrag = useRef<AxisName | null>(null);
   const lastPan = useRef({ x: 0, y: 0 });
@@ -154,7 +156,8 @@ export function CanvasView({
       : session.tool === 'pan'
         ? ' is-pan'
         : '';
-  const live = session.liveSelection();
+  const rectSize = session.liveRectSize();
+  const live = rectSize ?? session.liveSelection();
 
   return (
     <div
@@ -174,6 +177,7 @@ export function CanvasView({
           armed.current = null;
           panning.current = false;
           pasteDrag.current = null;
+          resizeDrag.current = null;
           axisDrag.current = null;
           setAxisCursor(null);
           setReadout(null);
@@ -191,6 +195,14 @@ export function CanvasView({
         if (session.pasteOrigin) {
           pasteDrag.current = cellAt(event);
           return;
+        }
+        if (session.tool === 'select' && session.selection) {
+          const handle = selectionHandleAt(session, event.clientX, event.clientY, event.currentTarget);
+          if (handle) {
+            session.startScale();
+            resizeDrag.current = handle;
+            return;
+          }
         }
         const hit = axisLocked ? null : axisHit(session, event.clientX, event.clientY, pixelRef.current);
         if (hit) {
@@ -232,6 +244,12 @@ export function CanvasView({
           remember(session, viewport, onChange, saveTimer);
           return;
         }
+        if (resizeDrag.current) {
+          const cell = cellAt(event);
+          if (cell) session.previewScale(resizeDrag.current, cell);
+          onChange();
+          return;
+        }
         if (pasteDrag.current) {
           const cell = cellAt(event);
           if (cell) {
@@ -269,6 +287,12 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (resizeDrag.current) {
+          resizeDrag.current = null;
+          session.commitScale();
+          onChange();
+          return;
+        }
         if (pasteDrag.current) {
           pasteDrag.current = null;
           session.confirmPaste();
@@ -292,6 +316,7 @@ export function CanvasView({
         hands.current = false;
         armed.current = null;
         pasteDrag.current = null;
+        resizeDrag.current = null;
         panning.current = false;
         axisDrag.current = null;
         setAxisCursor(null);
@@ -402,6 +427,7 @@ function draw(
   }
   if (session.selection) {
     strokeRect(overlayCtx, session.selection, viewport, '#243e66');
+    if (session.tool === 'select') drawHandles(overlayCtx, session.selection, viewport);
   }
   if (session.pasteOrigin && session.clipboard) {
     const clip = session.clipboard;
@@ -457,6 +483,68 @@ function strokeRect(
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.strokeRect(viewport.panX + rect.x * cellPx, viewport.panY + rect.y * cellPx, rect.width * cellPx, rect.height * cellPx);
+}
+
+function drawHandles(
+  ctx: CanvasRenderingContext2D,
+  rect: SelectionRect,
+  viewport: Viewport,
+): void {
+  const cellPx = viewport.cellSize * viewport.scale;
+  const left = viewport.panX + rect.x * cellPx;
+  const top = viewport.panY + rect.y * cellPx;
+  const right = left + rect.width * cellPx;
+  const bottom = top + rect.height * cellPx;
+  const midX = (left + right) / 2;
+  const midY = (top + bottom) / 2;
+  const size = 7;
+  ctx.fillStyle = '#f7f3eb';
+  ctx.strokeStyle = '#243e66';
+  ctx.lineWidth = 2;
+  for (const [x, y] of [[left, top], [midX, top], [right, top], [left, midY], [right, midY], [left, bottom], [midX, bottom], [right, bottom]]) {
+    ctx.fillRect(x - size, y - size, size * 2, size * 2);
+    ctx.strokeRect(x - size, y - size, size * 2, size * 2);
+  }
+}
+
+const HANDLE_HIT = 22;
+
+function selectionHandleAt(
+  session: EditorSession,
+  clientX: number,
+  clientY: number,
+  wrap: HTMLElement,
+): SelectionHandle | null {
+  const area = session.selection;
+  const box = wrap.getBoundingClientRect();
+  if (!area || box.width <= 0 || box.height <= 0) return null;
+  const x = clientX - box.left;
+  const y = clientY - box.top;
+  const { viewport } = session.doc;
+  const cellPx = viewport.cellSize * viewport.scale;
+  const left = viewport.panX + area.x * cellPx;
+  const top = viewport.panY + area.y * cellPx;
+  const right = left + area.width * cellPx;
+  const bottom = top + area.height * cellPx;
+  const midX = (left + right) / 2;
+  const midY = (top + bottom) / 2;
+  if (x > left + HANDLE_HIT && x < right - HANDLE_HIT && y > top + HANDLE_HIT && y < bottom - HANDLE_HIT) return null;
+  const points: [SelectionHandle, number, number][] = [
+    ['nw', left, top], ['ne', right, top], ['sw', left, bottom], ['se', right, bottom],
+    ['n', midX, top], ['s', midX, bottom], ['w', left, midY], ['e', right, midY],
+  ];
+  let best: SelectionHandle | null = null;
+  let bestDist = HANDLE_HIT * HANDLE_HIT;
+  for (const [handle, hx, hy] of points) {
+    const dx = x - hx;
+    const dy = y - hy;
+    const dist = dx * dx + dy * dy;
+    if (dist <= bestDist) {
+      bestDist = dist;
+      best = handle;
+    }
+  }
+  return best;
 }
 
 function drawAxes(

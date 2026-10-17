@@ -41,6 +41,8 @@ export const ru = {
   nudgeDown: 'Ось вниз',
   pencil: 'Карандаш',
   eraser: 'Ластик',
+  eraserLess: 'Меньше ластик',
+  eraserMore: 'Больше ластик',
   fill: 'Заливка',
   picker: 'Пипетка',
   line: 'Линия',

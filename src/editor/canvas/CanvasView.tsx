@@ -5,6 +5,7 @@ import { renderRgba } from '../../export/png.ts';
 import { ru } from '../../i18n/ru.ts';
 import { axisLabel } from '../symmetry/axisLabel.ts';
 import { Icon } from '../icons.tsx';
+import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
 
 type AxisName = 'vertical' | 'horizontal';
@@ -28,6 +29,7 @@ export function CanvasView({
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; midX: number; midY: number; viewport: Viewport } | null>(null);
   const hands = useRef(false);
+  const armed = useRef<{ x: number; y: number } | null>(null);
   const pasteDrag = useRef<{ x: number; y: number } | null>(null);
   const panning = useRef(false);
   const axisDrag = useRef<AxisName | null>(null);
@@ -152,6 +154,7 @@ export function CanvasView({
       : session.tool === 'pan'
         ? ' is-pan'
         : '';
+  const live = session.liveSelection();
 
   return (
     <div
@@ -168,6 +171,7 @@ export function CanvasView({
         pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (pointers.current.size >= 2) {
           hands.current = true;
+          armed.current = null;
           panning.current = false;
           pasteDrag.current = null;
           axisDrag.current = null;
@@ -201,8 +205,7 @@ export function CanvasView({
           lastPan.current = { x: event.clientX, y: event.clientY };
           return;
         }
-        session.pointerDown(cellAt(event));
-        onChange();
+        armed.current = cellAt(event);
       }}
       onPointerMove={(event) => {
         if (!pointers.current.has(event.pointerId)) return;
@@ -242,6 +245,10 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (armed.current) {
+          session.pointerDown(armed.current);
+          armed.current = null;
+        }
         session.pointerMove(cellAt(event));
         onChange();
       }}
@@ -272,6 +279,10 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (armed.current) {
+          session.pointerDown(armed.current);
+          armed.current = null;
+        }
         session.pointerUp();
         onChange();
       }}
@@ -279,6 +290,7 @@ export function CanvasView({
         pointers.current.clear();
         pinch.current = null;
         hands.current = false;
+        armed.current = null;
         pasteDrag.current = null;
         panning.current = false;
         axisDrag.current = null;
@@ -291,7 +303,15 @@ export function CanvasView({
       <canvas ref={pixelRef} />
       <canvas ref={overlayRef} className="overlay" />
       {readout ? <p className="axis-readout">{readout}</p> : null}
+      {live ? <p className="selection-readout">{selectionSizeLabel(live)}</p> : null}
       <div className="canvas-chrome" onPointerDown={(event) => event.stopPropagation()}>
+        {session.tool === 'eraser' ? (
+          <span className="eraser-size">
+            <button type="button" className="icon-btn" aria-label={ru.eraserLess} title={ru.eraserLess} disabled={session.eraserSize <= 1} onClick={() => { session.eraserSize = Math.max(1, session.eraserSize - 1); onChange(); }}><Icon name="minus" /></button>
+            <span className="step-value">{session.eraserSize}</span>
+            <button type="button" className="icon-btn" aria-label={ru.eraserMore} title={ru.eraserMore} disabled={session.eraserSize >= 8} onClick={() => { session.eraserSize = Math.min(8, session.eraserSize + 1); onChange(); }}><Icon name="plus" /></button>
+          </span>
+        ) : null}
         <button type="button" className="icon-btn" aria-label={ru.fit} title={ru.fit} onClick={fit}>
           <Icon name="fit" />
         </button>
@@ -468,10 +488,10 @@ function drawAxes(
       ctx.lineTo(viewport.panX + session.doc.width * cellPx, y);
     }
     ctx.strokeStyle = 'rgba(247, 243, 235, 0.92)';
-    ctx.lineWidth = dragging === which ? 7 : 5;
+    ctx.lineWidth = dragging === which ? 4 : 2;
     ctx.stroke();
     ctx.strokeStyle = '#b4334a';
-    ctx.lineWidth = dragging === which ? 3 : 2;
+    ctx.lineWidth = dragging === which ? 2 : 1;
     ctx.stroke();
   };
   if (symmetry.mode === 'vertical' || symmetry.mode === 'both') {
@@ -503,10 +523,10 @@ function axisHandle(which: AxisName, session: EditorSession, viewport: Viewport)
 
 function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.beginPath();
-  ctx.arc(x, y, 14, 0, Math.PI * 2);
+  ctx.arc(x, y, 8, 0, Math.PI * 2);
   ctx.fillStyle = '#f7f3eb';
   ctx.fill();
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 2;
   ctx.strokeStyle = '#b4334a';
   ctx.stroke();
 }
@@ -531,12 +551,12 @@ function axisHit(
   if (symmetry.mode === 'vertical' || symmetry.mode === 'both') {
     const line = Math.abs(x - axisX);
     const handle = Math.hypot(x - verticalHandle.x, y - verticalHandle.y);
-    if (line <= 22 || handle <= 28) hits.push({ which: 'vertical', dist: Math.min(line, handle) });
+    if (line <= 12 || handle <= 16) hits.push({ which: 'vertical', dist: Math.min(line, handle) });
   }
   if (symmetry.mode === 'horizontal' || symmetry.mode === 'both') {
     const line = Math.abs(y - axisY);
     const handle = Math.hypot(x - horizontalHandle.x, y - horizontalHandle.y);
-    if (line <= 22 || handle <= 28) hits.push({ which: 'horizontal', dist: Math.min(line, handle) });
+    if (line <= 12 || handle <= 16) hits.push({ which: 'horizontal', dist: Math.min(line, handle) });
   }
   hits.sort((a, b) => a.dist - b.dist);
   return hits[0]?.which ?? null;

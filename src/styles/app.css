@@ -174,11 +174,11 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 }
 
 .editor {
-  --rail: var(--tool-rail);
+  --tool-col: var(--tool-rail);
   --side: var(--panel);
   height: 100%;
   display: grid;
-  grid-template-columns: var(--rail) minmax(0, 1fr) var(--side);
+  grid-template-columns: var(--tool-col) minmax(0, 1fr) var(--side);
   grid-template-rows: var(--bar) minmax(0, 1fr);
   overflow: hidden;
   background: var(--linen);
@@ -253,7 +253,7 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-2) 0;
-  background: var(--rail);
+  background: #14110f;
   color: var(--wool);
   overflow: auto;
   touch-action: pan-y;
@@ -316,11 +316,9 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
   font-size: var(--text-sm);
 }
 
-.axis-readout {
+.axis-readout, .selection-readout {
   position: absolute;
   top: var(--space-3);
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 2;
   margin: 0;
   padding: 6px 12px;
@@ -331,6 +329,26 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
   pointer-events: none;
   white-space: nowrap;
 }
+
+.axis-readout {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.selection-readout { left: var(--space-3); }
+
+.eraser-size {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  background: var(--wool);
+  color: var(--ink);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(28, 22, 20, 0.16);
+}
+
+.eraser-size .icon-btn { width: 36px; min-width: 36px; height: 36px; min-height: 36px; }
 
 .side {
   grid-row: 2;
@@ -502,17 +520,6 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 
 .note { margin: 0; font-size: var(--text-sm); }
 
-.scrim {
-  display: none;
-  position: absolute;
-  z-index: 4;
-  inset: var(--bar) 0 0 0;
-  border: 0;
-  min-width: 0;
-  padding: 0;
-  background: rgba(28, 22, 20, 0.28);
-}
-
 .sheet, .banner {
   position: fixed;
   z-index: 6;
@@ -534,31 +541,7 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 .file input { margin-top: var(--space-2); }
 
 @media (max-width: 1200px) {
-  .editor {
-    --side: 0px;
-    grid-template-columns: var(--rail) minmax(0, 1fr);
-  }
-
-  .side {
-    position: absolute;
-    z-index: 5;
-    grid-column: 1 / -1;
-    grid-row: 1 / -1;
-    top: var(--bar);
-    right: 0;
-    bottom: 0;
-    width: min(300px, calc(100% - var(--rail)));
-    box-shadow: -8px 0 24px rgba(28, 22, 20, 0.16);
-  }
-
-  .editor.panel-open .scrim { display: block; }
-
-  .scrim {
-    grid-column: 1 / -1;
-    grid-row: 1 / -1;
-    left: var(--rail);
-    bottom: 0;
-  }
+  .editor.panel-open { --side: min(240px, 42vw); }
 
   .create, .auth, .diagnostics { flex-direction: column; align-items: stretch; }
   .gallery-head h1 { font-size: 28px; }

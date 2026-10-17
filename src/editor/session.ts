@@ -66,6 +66,8 @@ export class EditorSession {
   history: HistoryStacks;
   tool: ToolId = 'pencil';
   colorSlot = 1;
+  /** Square eraser edge, in cells. ponytail: capped at 8; a circle brush would replace the square stamp. */
+  eraserSize = 1;
   selection: SelectionRect | null = null;
   clipboard: ClipboardPayload | null = null;
   pasteOrigin: Point | null = null;
@@ -317,6 +319,18 @@ export class EditorSession {
     this.persist('replace', [], false);
   }
 
+  private stamp(cell: Point): Point[] {
+    if (this.gesture?.kind !== 'stroke' || this.gesture.tool !== 'eraser' || this.eraserSize <= 1) return [cell];
+    const points: Point[] = [];
+    const half = Math.floor((this.eraserSize - 1) / 2);
+    for (let dy = 0; dy < this.eraserSize; dy += 1) {
+      for (let dx = 0; dx < this.eraserSize; dx += 1) {
+        points.push({ x: cell.x - half + dx, y: cell.y - half + dy });
+      }
+    }
+    return points;
+  }
+
   private fillAt(seed: Point): void {
     const seeds = reflectPoints([seed], this.doc.symmetry, this.doc.width, this.doc.height);
     const indexes = new Set<number>();
@@ -336,7 +350,7 @@ export class EditorSession {
 
   private extendStroke(cell: Point): void {
     if (!this.gesture || this.gesture.kind !== 'stroke') return;
-    const segment = lineCells(this.gesture.last, cell);
+    const segment = lineCells(this.gesture.last, cell).flatMap((point) => this.stamp(point));
     const value = this.gesture.tool === 'eraser' ? 0 : this.colorSlot;
     const reflected = reflectPoints(segment, this.doc.symmetry, this.doc.width, this.doc.height);
     const patches = patchesForValues(this.doc.cells, this.doc.width, this.doc.height, reflected, () => value);

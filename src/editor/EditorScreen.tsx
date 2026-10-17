@@ -48,7 +48,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const [axisLocked, setAxisLocked] = useState(false);
   const [draftHex, setDraftHex] = useState<string | null>(null);
-  const colorTimer = useRef(0);
   const refresh = () => setFrame((value) => value + 1);
 
   useEffect(() => {
@@ -198,7 +197,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
       <div className="stage">
         <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} />
       </div>
-      <button type="button" className="scrim" aria-label={ru.closePanel} onClick={() => setPanelOpen(false)} />
       <aside className="side" inert={!panelOpen}>
         {error ? <p className="warning">{error}</p> : null}
         <section className="group" aria-label={ru.display}>
@@ -278,18 +276,24 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
                 type="color"
                 aria-label={ru.pickColor}
                 value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614'}
-                onChange={(event) => {
-                  const hex = event.target.value;
-                  setDraftHex(hex);
-                  window.clearTimeout(colorTimer.current);
-                  colorTimer.current = window.setTimeout(() => {
-                    session.useColor(hex);
-                    setDraftHex(null);
-                    refresh();
-                  }, 300);
-                }}
+                onChange={(event) => setDraftHex(event.target.value)}
               />
             </label>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={ru.addColor}
+              title={ru.addColor}
+              disabled={!draftHex}
+              onClick={() => {
+                if (!draftHex) return;
+                session.useColor(draftHex);
+                setDraftHex(null);
+                refresh();
+              }}
+            >
+              <Icon name="check" />
+            </button>
             {session.doc.palette.map((color, index) => (
               <button
                 key={color.id}

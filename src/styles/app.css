@@ -337,18 +337,36 @@ label { display: flex; flex-direction: column; gap: var(--space-1); }
 
 .selection-readout { left: var(--space-3); }
 
-.eraser-size {
+.size-pop {
+  position: fixed;
+  z-index: 6;
+  left: calc(var(--tool-col) + 8px);
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 2px;
-  padding: 0 4px;
-  background: var(--wool);
-  color: var(--ink);
-  border-radius: var(--radius);
-  box-shadow: 0 1px 2px rgba(28, 22, 20, 0.16);
+  gap: var(--space-2);
+  margin: 0;
+  padding: 8px 12px;
+  background: #14110f;
+  color: var(--wool);
+  border-radius: 999px;
+  transform: translateY(-50%);
 }
 
-.eraser-size .icon-btn { width: 36px; min-width: 36px; height: 36px; min-height: 36px; }
+.size-pop input[type="range"] {
+  width: 140px;
+  height: 28px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.size-pop span {
+  min-width: 12px;
+  font-variant-numeric: tabular-nums;
+}
 
 .side {
   grid-row: 2;

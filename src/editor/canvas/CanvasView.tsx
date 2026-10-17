@@ -305,13 +305,6 @@ export function CanvasView({
       {readout ? <p className="axis-readout">{readout}</p> : null}
       {live ? <p className="selection-readout">{selectionSizeLabel(live)}</p> : null}
       <div className="canvas-chrome" onPointerDown={(event) => event.stopPropagation()}>
-        {session.tool === 'eraser' ? (
-          <span className="eraser-size">
-            <button type="button" className="icon-btn" aria-label={ru.eraserLess} title={ru.eraserLess} disabled={session.eraserSize <= 1} onClick={() => { session.eraserSize = Math.max(1, session.eraserSize - 1); onChange(); }}><Icon name="minus" /></button>
-            <span className="step-value">{session.eraserSize}</span>
-            <button type="button" className="icon-btn" aria-label={ru.eraserMore} title={ru.eraserMore} disabled={session.eraserSize >= 8} onClick={() => { session.eraserSize = Math.min(8, session.eraserSize + 1); onChange(); }}><Icon name="plus" /></button>
-          </span>
-        ) : null}
         <button type="button" className="icon-btn" aria-label={ru.fit} title={ru.fit} onClick={fit}>
           <Icon name="fit" />
         </button>

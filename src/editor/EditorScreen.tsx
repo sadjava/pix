@@ -48,6 +48,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const [axisLocked, setAxisLocked] = useState(false);
   const [draftHex, setDraftHex] = useState<string | null>(null);
+  const [sizeFor, setSizeFor] = useState<{ tool: 'pencil' | 'eraser'; top: number } | null>(null);
   const refresh = () => setFrame((value) => value + 1);
 
   useEffect(() => {
@@ -188,12 +189,41 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
             aria-label={tool.label}
             title={tool.label}
             aria-pressed={session.tool === tool.id}
-            onClick={() => { session.setTool(tool.id); refresh(); }}
+            onClick={(event) => {
+              const sized = tool.id === 'pencil' || tool.id === 'eraser' ? tool.id : null;
+              if (sized && session.tool === sized) {
+                const box = event.currentTarget.getBoundingClientRect();
+                const top = box.top + box.height / 2;
+                setSizeFor((current) => current?.tool === sized ? null : { tool: sized, top });
+                return;
+              }
+              session.setTool(tool.id);
+              setSizeFor(null);
+              refresh();
+            }}
           >
             <Icon name={tool.icon} />
           </button>
         ))}
       </nav>
+      {sizeFor ? (
+        <label className="size-pop" style={{ top: sizeFor.top }}>
+          <input
+            type="range"
+            min={1}
+            max={8}
+            aria-label={sizeFor.tool === 'eraser' ? ru.eraserSize : ru.brushSize}
+            value={sizeFor.tool === 'eraser' ? session.eraserSize : session.brushSize}
+            onChange={(event) => {
+              const size = Number(event.target.value);
+              if (sizeFor.tool === 'eraser') session.eraserSize = size;
+              else session.brushSize = size;
+              refresh();
+            }}
+          />
+          <span>{sizeFor.tool === 'eraser' ? session.eraserSize : session.brushSize}</span>
+        </label>
+      ) : null}
       <div className="stage">
         <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} />
       </div>
@@ -254,7 +284,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.snapEdge} title={ru.snapEdge} aria-pressed={axisSnap === 'edge'} disabled={axisLocked} onClick={() => chooseSnap('edge')}><Icon name="snapEdge" /></button>
             <button type="button" className="icon-btn" aria-label={ru.snapCenter} title={ru.snapCenter} aria-pressed={axisSnap === 'center'} disabled={axisLocked} onClick={() => chooseSnap('center')}><Icon name="snapCenter" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.centerAxes} title={ru.centerAxes} disabled={axisLocked} onClick={() => centerAxes(session, axisSnap, saveView)}><Icon name="crosshair" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.centerAxes} title={ru.centerAxes} aria-pressed={axesCentered(session, axisSnap)} disabled={axisLocked} onClick={() => centerAxes(session, axisSnap, saveView)}><Icon name="crosshair" /></button>
           </div>
           <p className="axis-coords" title={`${axisLabel(session.doc.symmetry.axisX2, session.doc.width, true)}. ${axisLabel(session.doc.symmetry.axisY2, session.doc.height, false)}`}>
             {shortAxis(session.doc.symmetry.axisX2, session.doc.width)} · {shortAxis(session.doc.symmetry.axisY2, session.doc.height)}
@@ -372,6 +402,16 @@ function nudge(
   const next = clampAxis(snapAxis(nudgeAxis(snapped, direction * 2, edge), mode), edge);
   session.doc.symmetry = { ...session.doc.symmetry, [key]: next };
   done();
+}
+
+function axesCentered(session: EditorSession, mode: 'center' | 'edge'): boolean {
+  const { symmetry, width, height } = session.doc;
+  const x = clampAxis(snapAxis(width, mode), width);
+  const y = clampAxis(snapAxis(height, mode), height);
+  const vertical = symmetry.mode === 'vertical' || symmetry.mode === 'both';
+  const horizontal = symmetry.mode === 'horizontal' || symmetry.mode === 'both';
+  if (!vertical && !horizontal) return symmetry.axisX2 === x && symmetry.axisY2 === y;
+  return (!vertical || symmetry.axisX2 === x) && (!horizontal || symmetry.axisY2 === y);
 }
 
 function centerAxes(session: EditorSession, mode: 'center' | 'edge', done: () => void): void {

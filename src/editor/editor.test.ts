@@ -93,6 +93,18 @@ describe('pencil, eraser, fill, picker', () => {
     expect(editor.doc.width).toBe(8);
   });
 
+  it('paints a square of the chosen brush size', () => {
+    const editor = session();
+    editor.brushSize = 2;
+    editor.pointerDown({ x: 1, y: 1 });
+    editor.pointerUp();
+    expect(editor.doc.cells[1 * 8 + 1]).toBe(1);
+    expect(editor.doc.cells[1 * 8 + 2]).toBe(1);
+    expect(editor.doc.cells[2 * 8 + 1]).toBe(1);
+    expect(editor.doc.cells[2 * 8 + 2]).toBe(1);
+    expect(editor.doc.cells[0]).toBe(0);
+  });
+
   it('erases a square of the chosen size', () => {
     const editor = session();
     editor.doc.cells.fill(1);

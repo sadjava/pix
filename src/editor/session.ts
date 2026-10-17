@@ -66,7 +66,8 @@ export class EditorSession {
   history: HistoryStacks;
   tool: ToolId = 'pencil';
   colorSlot = 1;
-  /** Square eraser edge, in cells. ponytail: capped at 8; a circle brush would replace the square stamp. */
+  /** Square stamp edge, in cells. ponytail: capped at 8; a circle stamp would replace the square. */
+  brushSize = 1;
   eraserSize = 1;
   selection: SelectionRect | null = null;
   clipboard: ClipboardPayload | null = null;
@@ -320,11 +321,12 @@ export class EditorSession {
   }
 
   private stamp(cell: Point): Point[] {
-    if (this.gesture?.kind !== 'stroke' || this.gesture.tool !== 'eraser' || this.eraserSize <= 1) return [cell];
+    const size = this.gesture?.kind === 'stroke' && this.gesture.tool === 'eraser' ? this.eraserSize : this.brushSize;
+    if (this.gesture?.kind !== 'stroke' || size <= 1) return [cell];
     const points: Point[] = [];
-    const half = Math.floor((this.eraserSize - 1) / 2);
-    for (let dy = 0; dy < this.eraserSize; dy += 1) {
-      for (let dx = 0; dx < this.eraserSize; dx += 1) {
+    const half = Math.floor((size - 1) / 2);
+    for (let dy = 0; dy < size; dy += 1) {
+      for (let dx = 0; dx < size; dx += 1) {
         points.push({ x: cell.x - half + dx, y: cell.y - half + dy });
       }
     }

@@ -111,6 +111,7 @@ export class EditorSession {
   setColorSlot(slot: number): void {
     if (slot !== this.colorSlot) this.previousSlot = this.colorSlot;
     this.colorSlot = slot;
+    this.armBrush();
   }
 
   swapColors(): void {
@@ -118,6 +119,13 @@ export class EditorSession {
     const next = this.previousSlot;
     this.previousSlot = this.colorSlot;
     this.colorSlot = next;
+    this.armBrush();
+  }
+
+  private armBrush(): void {
+    if (this.tool === 'pencil') return;
+    this.fillErase = false;
+    this.tool = 'pencil';
   }
 
   useColor(hex: string): void {

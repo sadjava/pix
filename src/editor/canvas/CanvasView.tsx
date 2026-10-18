@@ -511,7 +511,7 @@ function draw(
   const pictures = session.traces.filter((trace) => trace.image);
   const image = renderRgba(session.doc, {
     grid: false,
-    checker: pictures.length === 0 && session.doc.checkerVisible,
+    checker: false,
     pixelsPerCell: 1,
     border: false,
     checkerBlock: session.doc.checkerBlock,
@@ -527,7 +527,7 @@ function draw(
   const { viewport } = session.doc;
   const drawW = session.doc.width * viewport.cellSize * viewport.scale;
   const drawH = session.doc.height * viewport.cellSize * viewport.scale;
-  if (pictures.length > 0 && session.doc.checkerVisible) fillChecker(pixelCtx, viewport, drawW, drawH, session.doc.checkerBlock);
+  if (session.doc.checkerVisible) fillChecker(pixelCtx, viewport, session.doc.width, session.doc.height, session.doc.checkerBlock);
   pixelCtx.imageSmoothingEnabled = true;
   pixelCtx.imageSmoothingQuality = 'high';
   for (const trace of pictures) drawTrace(pixelCtx, trace, viewport);
@@ -880,28 +880,34 @@ function drawTraceGrips(ctx: CanvasRenderingContext2D, trace: TraceSprite, viewp
   ctx.restore();
 }
 
-function fillChecker(ctx: CanvasRenderingContext2D, viewport: Viewport, drawW: number, drawH: number, block: number): void {
-  const blockPx = Math.max(1, block) * viewport.cellSize * viewport.scale;
-  const tile = Math.max(2, Math.round(blockPx * 2));
-  const sample = document.createElement('canvas');
-  sample.width = tile;
-  sample.height = tile;
-  const sampleCtx = sample.getContext('2d');
-  if (!sampleCtx) return;
-  const half = tile / 2;
-  sampleCtx.fillStyle = '#e8e2d8';
-  sampleCtx.fillRect(0, 0, tile, tile);
-  sampleCtx.fillStyle = '#c4bcb0';
-  sampleCtx.fillRect(0, 0, half, half);
-  sampleCtx.fillRect(half, half, half, half);
-  const pattern = ctx.createPattern(sample, 'repeat');
-  if (!pattern) return;
+function fillChecker(
+  ctx: CanvasRenderingContext2D,
+  viewport: Viewport,
+  gridWidth: number,
+  gridHeight: number,
+  block: number,
+): void {
+  // A repeating pattern is painted in device pixels, so on a tablet the squares leave the cells and the gap grows with zoom.
+  const cellPx = viewport.cellSize * viewport.scale;
+  const span = Math.max(1, block) * cellPx;
+  const { panX, panY } = viewport;
+  const drawW = gridWidth * cellPx;
+  const drawH = gridHeight * cellPx;
+  const cols = Math.ceil(gridWidth / Math.max(1, block));
+  const rows = Math.ceil(gridHeight / Math.max(1, block));
   ctx.save();
   ctx.beginPath();
-  ctx.rect(viewport.panX, viewport.panY, drawW, drawH);
+  ctx.rect(panX, panY, drawW, drawH);
   ctx.clip();
-  ctx.translate(viewport.panX, viewport.panY);
-  ctx.fillStyle = pattern;
-  ctx.fillRect(0, 0, drawW, drawH);
+  ctx.fillStyle = '#e8e2d8';
+  ctx.fillRect(panX, panY, drawW, drawH);
+  ctx.beginPath();
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = y % 2 === 0 ? 1 : 0; x < cols; x += 2) {
+      ctx.rect(panX + x * span, panY + y * span, span, span);
+    }
+  }
+  ctx.fillStyle = '#c4bcb0';
+  ctx.fill();
   ctx.restore();
 }

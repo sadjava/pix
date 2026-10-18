@@ -178,12 +178,16 @@ describe('pencil, eraser, fill, picker', () => {
     editor.setColorSlot(1);
     editor.previousSlot = null;
     editor.doc.palette.push({ id: 'clay', name: 'Глина', hex: '#be6437' });
+    editor.setTool('eraser');
     editor.setColorSlot(2);
     expect(editor.colorSlot).toBe(2);
     expect(editor.previousSlot).toBe(1);
+    expect(editor.tool).toBe('pencil');
+    editor.setTool('fill');
     editor.swapColors();
     expect(editor.colorSlot).toBe(1);
     expect(editor.previousSlot).toBe(2);
+    expect(editor.tool).toBe('pencil');
   });
 
   it('picks the color under the pointer', () => {
@@ -192,8 +196,11 @@ describe('pencil, eraser, fill, picker', () => {
     editor.setTool('picker');
     editor.pointerDown({ x: 3, y: 0 });
     expect(editor.colorSlot).toBe(4);
+    expect(editor.tool).toBe('pencil');
+    editor.setTool('picker');
     editor.pointerDown({ x: 0, y: 0 });
     expect(editor.colorSlot).toBe(4);
+    expect(editor.tool).toBe('picker');
   });
 
   it('checkpoints a long stroke on the timer without an undo entry yet', () => {

@@ -121,6 +121,31 @@ describe('local projects', () => {
     repo.close();
   });
 
+  it('pans without a new rug time and drops journal rows the snapshot already has', async () => {
+    const repo = ProjectRepository.open('pan');
+    const created = await repo.create({ name: 'Сдвиг', width: 4, height: 2 });
+    await paintAndSave(repo, created.record.id, 1);
+    const stamped = await repo.db.projects.get(created.record.id);
+    if (!stamped) throw new Error('record');
+    const loaded = await repo.load(created.record.id);
+    if (!('doc' in loaded)) throw new Error('load');
+    loaded.doc.viewport = { ...loaded.doc.viewport, panX: 40 };
+    const after = await repo.commit(created.record.id, {
+      doc: loaded.doc,
+      history: loaded.history,
+      patches: [],
+      opNumber: loaded.record.documentRevision,
+      type: 'viewport',
+    });
+    expect(after.updatedAt).toBe(stamped.updatedAt);
+    expect(after.documentRevision).toBe(stamped.documentRevision);
+    const again = await repo.load(created.record.id);
+    expect('doc' in again && again.doc.viewport.panX).toBe(40);
+    expect('doc' in again && again.doc.cells[1]).toBe(1);
+    expect(await repo.db.journal.where('projectId').equals(created.record.id).count()).toBe(0);
+    repo.close();
+  });
+
   it('duplicates and renames without touching another project', async () => {
     const repo = ProjectRepository.open('dup');
     const created = await repo.create({ name: 'Оригинал', width: 3, height: 3 });

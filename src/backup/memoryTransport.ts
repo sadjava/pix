@@ -13,6 +13,11 @@ export class MemoryTransport implements SyncTransport {
     this.rows.set(row.id, row);
   }
 
+  async head(projectId: string): Promise<{ documentRevision: number; updatedAt: string } | null> {
+    const row = await this.get(projectId);
+    return row ? { documentRevision: row.documentRevision, updatedAt: row.updatedAt } : null;
+  }
+
   async get(projectId: string): Promise<RugRow | null> {
     if (this.authExpired) throw new Error('auth');
     const row = this.rows.get(projectId);

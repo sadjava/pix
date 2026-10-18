@@ -391,6 +391,12 @@ export class EditorSession {
 
   setView(patch: Partial<Pick<ProjectDocument, 'gridVisible' | 'checkerVisible' | 'checkerBlock' | 'symmetry' | 'viewport' | 'palette'>>): void {
     this.doc = { ...this.doc, ...patch };
+    const content = 'palette' in patch || 'symmetry' in patch || 'gridVisible' in patch || 'checkerVisible' in patch || 'checkerBlock' in patch;
+    if (!content) {
+      this.persist('viewport', [], false);
+      return;
+    }
+    this.revision += 1;
     this.persist('view', [], false);
   }
 

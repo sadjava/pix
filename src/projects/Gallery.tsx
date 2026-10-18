@@ -109,7 +109,7 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
               <strong>{project.name}</strong>
               <span>{project.width} × {project.height} {ru.cells}</span>
               <span>{new Date(project.updatedAt).toLocaleString('ru')}</span>
-              <span>{project.lastCloudBackupAt ? ru.backupOk : ru.backupOff}</span>
+              <span>{backupText(project.syncState)}</span>
             </button>
             <div className="row">
               <button type="button" onClick={() => void rename(project, reload)}>{ru.rename}</button>
@@ -141,6 +141,14 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
       </section>
     </main>
   );
+}
+
+function backupText(state: ProjectRecord['syncState']): string {
+  if (state === 'backed-up') return ru.backupOk;
+  if (state === 'pending' || state === 'uploading') return ru.backupPending;
+  if (state === 'error') return ru.backupError;
+  if (state === 'conflict') return ru.backupConflict;
+  return ru.backupOff;
 }
 
 function Preview({ id }: { id: string }) {

@@ -41,14 +41,15 @@ export async function drainOutbox(
       await repo.deleteOutbox(queued.id);
       continue;
     }
-    let remote = null;
+    let remote: { documentRevision: number; updatedAt: string } | null = null;
     try {
-      remote = await transport.get(record.id);
+      remote = await transport.head(record.id);
     } catch {
       await fail(repo, queued, record);
       continue;
     }
-    const decision = decideSync(record.documentRevision, syncedRevision(record.cloudRevisionId), remote?.documentRevision ?? null);
+    let decision = decideSync(record.documentRevision, syncedRevision(record.cloudRevisionId), remote?.documentRevision ?? null);
+    if (decision === 'skip' && remote && record.updatedAt > remote.updatedAt) decision = 'push';
     if (decision === 'skip') {
       await repo.deleteOutbox(queued.id);
       if (record.syncState !== 'backed-up') {
@@ -61,9 +62,10 @@ export async function drainOutbox(
       await repo.deleteOutbox(queued.id);
       continue;
     }
-    if (decision === 'pull' && remote) {
-      const doc = await documentFromRow(remote);
-      if (!doc) {
+    if (decision === 'pull') {
+      const row = await transport.get(record.id);
+      const doc = row ? await documentFromRow(row) : null;
+      if (!row || !doc) {
         await fail(repo, queued, record);
         continue;
       }
@@ -71,13 +73,13 @@ export async function drainOutbox(
         doc,
         history: emptyHistory(),
         patches: [],
-        opNumber: remote.documentRevision,
+        opNumber: row.documentRevision,
         type: 'sync',
         recordPatch: {
-          name: remote.name,
+          name: row.name,
           syncState: 'backed-up',
-          cloudRevisionId: String(remote.documentRevision),
-          lastCloudBackupAt: remote.updatedAt,
+          cloudRevisionId: String(row.documentRevision),
+          lastCloudBackupAt: row.updatedAt,
         },
       });
       await repo.deleteOutbox(queued.id);

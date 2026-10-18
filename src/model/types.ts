@@ -4,7 +4,7 @@ export const DEFAULT_WIDTH = 100;
 export const DEFAULT_HEIGHT = 100;
 export const WARN_EDGE = 500;
 export const MAX_EDGE = 4000;
-export const HISTORY_LIMIT = 100;
+export const HISTORY_LIMIT = 40;
 export const CHECKPOINT_MS = 500;
 export const BACKUP_DEBOUNCE_MS = 15_000;
 

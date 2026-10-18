@@ -1,11 +1,15 @@
 import { HISTORY_LIMIT, type CellPatch, type HistoryEntry } from '../../model/types.ts';
 
-const BYTE_LIMIT = 1_500_000;
+const BYTE_LIMIT = 400_000;
 
 export interface HistoryStacks {
   undo: HistoryEntry[];
   redo: HistoryEntry[];
   notice: string | null;
+}
+
+export function clipHistory(stacks: HistoryStacks): HistoryStacks {
+  return { undo: trim(stacks.undo), redo: trim(stacks.redo), notice: stacks.notice };
 }
 
 export function emptyHistory(): HistoryStacks {

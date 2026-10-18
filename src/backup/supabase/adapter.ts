@@ -35,6 +35,12 @@ export async function createSupabaseTransport(config: SupabaseConfig): Promise<S
       const { error } = await client.from('rugs').upsert(toRow(row), { onConflict: 'id' });
       if (error) throw new Error(error.code === '42501' ? 'forbidden' : 'network');
     },
+    async head(projectId) {
+      const { data, error } = await client.from('rugs').select('document_revision, updated_at').eq('id', projectId).maybeSingle();
+      if (error) throw new Error(error.message === 'JWT expired' ? 'auth' : 'network');
+      if (!data) return null;
+      return { documentRevision: Number(data.document_revision), updatedAt: String(data.updated_at) };
+    },
     async get(projectId) {
       const { data, error } = await client.from('rugs').select('*').eq('id', projectId).maybeSingle();
       if (error) throw new Error(error.message === 'JWT expired' ? 'auth' : 'network');

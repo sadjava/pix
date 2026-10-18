@@ -32,6 +32,8 @@ export interface RugRef {
 export interface SyncTransport {
   upsert(row: RugRow): Promise<void>;
   get(projectId: string): Promise<RugRow | null>;
+  /** Revision and time only, so a sync does not download the cell blob. */
+  head(projectId: string): Promise<{ documentRevision: number; updatedAt: string } | null>;
   list(): Promise<RugRow[]>;
   listRefs(): Promise<RugRef[]>;
   remove(projectId: string): Promise<void>;
@@ -39,15 +41,12 @@ export interface SyncTransport {
 
 export type SyncDecision = 'push' | 'pull' | 'conflict' | 'skip';
 
-/** Local edits and a newer remote row at the same time stay side by side. */
+/** A newer local revision is uploaded. An older cloud row never replaces it. */
 export function decideSync(localRevision: number, syncedRevision: number, remoteRevision: number | null): SyncDecision {
-  if (remoteRevision === null) return 'push';
+  if (remoteRevision === null || localRevision > remoteRevision) return 'push';
   if (remoteRevision === localRevision) return 'skip';
-  const localDirty = localRevision !== syncedRevision;
-  const remoteDirty = remoteRevision !== syncedRevision;
-  if (localDirty && remoteDirty) return 'conflict';
-  if (remoteDirty && remoteRevision > localRevision) return 'pull';
-  return 'push';
+  if (localRevision === syncedRevision) return 'pull';
+  return 'conflict';
 }
 
 export function syncedRevision(cloudRevisionId: string | null): number {

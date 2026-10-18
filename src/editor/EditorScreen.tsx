@@ -514,7 +514,8 @@ async function backupNow(record: ProjectRecord, session: EditorSession): Promise
   const ownerId = await repository.readMeta<string>('backupUserId');
   const enabled = await repository.readMeta<boolean>('backupEnabled');
   if (!url || !publishableKey || !ownerId || !enabled || session.gesture || !navigator.onLine) return;
-  if (record.syncState === 'backed-up' && record.documentRevision === session.revision) return;
+  const cloudTime = record.lastCloudBackupAt ?? '';
+  if (record.syncState === 'backed-up' && record.documentRevision === session.revision && record.updatedAt <= cloudTime) return;
   await enqueueBackup(repository, { ...record, documentRevision: session.revision });
   const { createSupabaseTransport } = await import('../backup/supabase/adapter.ts');
   const transport = await createSupabaseTransport({ url, publishableKey, ownerId });

@@ -1,7 +1,7 @@
 import type { CellPatch, HistoryEntry, JournalEntry, ProjectDocument, ProjectRecord } from '../model/types.ts';
 import { SCHEMA_VERSION } from '../model/types.ts';
 import { createDocument } from '../editor/canvas/grid.ts';
-import { emptyHistory, parseHistory, type HistoryStacks } from '../editor/history/patches.ts';
+import { clipHistory, emptyHistory, parseHistory, type HistoryStacks } from '../editor/history/patches.ts';
 import { cellsToBytes } from '../export/json.ts';
 import { arrayBuffer } from '../export/checksum.ts';
 import { migrateDocument, recoverCells } from './recover.ts';
@@ -124,7 +124,11 @@ export class ProjectRepository {
     const journal = await this.db.journal.where('projectId').equals(id).toArray();
     const cells = recoverCells(migrated.doc.cells, snapshot.revision, journal);
     const historyRow = await this.db.histories.get(id);
-    const history = parseHistory(historyRow ?? { undo: [], redo: [] });
+    const parsed = parseHistory(historyRow ?? { undo: [], redo: [] });
+    const history = clipHistory(parsed);
+    if (historyRow && (history.undo.length !== parsed.undo.length || history.redo.length !== parsed.redo.length)) {
+      await this.db.histories.put({ projectId: id, undo: history.undo, redo: history.redo, notice: history.notice });
+    }
     const doc = { ...migrated.doc, cells, viewport: snapshot.viewport ?? migrated.doc.viewport };
     return { record: { ...record, lastOpenedAt: record.lastOpenedAt }, doc, history };
   }
@@ -132,6 +136,10 @@ export class ProjectRepository {
   async commit(id: string, input: CommitInput): Promise<ProjectRecord> {
     const existing = await this.db.projects.get(id);
     if (!existing) throw new Error('missing project');
+    if (input.type === 'viewport') {
+      await this.db.snapshots.update(id, { viewport: input.doc.viewport });
+      return existing;
+    }
     const now = new Date().toISOString();
     const record: ProjectRecord = {
       ...existing,
@@ -190,15 +198,12 @@ export class ProjectRepository {
         notice: history.notice,
       });
       await this.db.projects.put(record);
-      const rows = await this.db.journal.where('projectId').equals(record.id).toArray();
-      // ponytail: one transaction replaces the snapshot; the previous row stays if this transaction aborts.
-      if (rows.length > 40) {
-        await this.db.journal
-          .where('projectId')
-          .equals(record.id)
-          .filter((row) => row.opNumber <= record.documentRevision)
-          .delete();
-      }
+      // The snapshot already contains these stitches. Older journal rows are not a second copy.
+      await this.db.journal
+        .where('projectId')
+        .equals(record.id)
+        .filter((row) => row.opNumber <= record.documentRevision)
+        .delete();
     });
   }
 }

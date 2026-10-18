@@ -81,9 +81,10 @@ describe('database sync', () => {
   });
 
   it('marks diverged revisions as a conflict and hides another user', async () => {
-    expect(decideSync(2, 0, 1)).toBe('conflict');
+    expect(decideSync(5, 1, 3)).toBe('push');
     expect(decideSync(2, 1, 1)).toBe('push');
     expect(decideSync(1, 1, 3)).toBe('pull');
+    expect(decideSync(2, 1, 4)).toBe('conflict');
     const repo = ProjectRepository.open('conflict');
     const created = await repo.create({ name: 'Спор', width: 2, height: 2 });
     const transport = new MemoryTransport();
@@ -107,6 +108,32 @@ describe('database sync', () => {
       false,
     );
     expect(older.syncState).toBe('pending');
+    repo.close();
+  });
+
+  it('uploads a newer local copy over an older cloud row and keeps the local stitches', async () => {
+    const repo = ProjectRepository.open('newer');
+    const created = await repo.create({ name: 'Новее', width: 2, height: 2 });
+    created.doc.cells[0] = 1;
+    const saved = await repo.commit(created.record.id, {
+      doc: created.doc,
+      history: emptyHistory(),
+      patches: [{ index: 0, before: 0, after: 1 }],
+      opNumber: created.record.documentRevision,
+      type: 'stroke',
+    });
+    const transport = new MemoryTransport();
+    const staleDoc = { ...created.doc, cells: new Uint16Array(created.doc.cells.length) };
+    const stale = await rugFromDocument('owner-1', { ...saved, updatedAt: '2026-10-17T21:36:20.000Z' }, staleDoc);
+    await transport.upsert(stale);
+    await enqueueBackup(repo, saved);
+    await drainOutbox(repo, transport, 'owner-1', '2026-10-18T07:17:39.000Z');
+    const remote = transport.rows.get(saved.id);
+    const restored = remote ? await documentFromRow(remote) : null;
+    expect(restored?.cells[0]).toBe(1);
+    const local = await repo.load(saved.id);
+    expect('doc' in local && local.doc.cells[0]).toBe(1);
+    expect(local && 'record' in local && local.record.syncState).toBe('backed-up');
     repo.close();
   });
 

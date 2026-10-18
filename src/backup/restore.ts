@@ -19,7 +19,12 @@ export async function rugFromDocument(
     schemaVersion: doc.schemaVersion,
     documentRevision: record.documentRevision,
     updatedAt: record.updatedAt,
-    palette: doc.palette.map((color) => ({ id: color.id, name: color.name, hex: color.hex })),
+    palette: doc.palette.map((color) => ({
+      id: color.id,
+      name: color.name,
+      hex: color.hex,
+      ...(color.hidden ? { hidden: true } : {}),
+    })),
     cells: cellsToBase64(doc.cells),
     gridVisible: doc.gridVisible,
     checkerVisible: doc.checkerVisible,

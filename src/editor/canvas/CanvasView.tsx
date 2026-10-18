@@ -419,9 +419,9 @@ export function CanvasView({
               }}
             />
           </label>
-          {session.colorOrder.map((slot) => {
-            const color = session.doc.palette[slot - 1];
-            if (!color) return null;
+          {session.doc.palette.map((color, index) => {
+            if (color.hidden) return null;
+            const slot = index + 1;
             return (
               <button
                 key={color.id}
@@ -435,6 +435,16 @@ export function CanvasView({
               />
             );
           })}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={ru.deleteColor}
+            title={ru.deleteColor}
+            disabled={session.doc.palette.filter((color) => !color.hidden).length < 2}
+            onClick={() => { session.dismissColor(session.colorSlot - 1); onChange(); }}
+          >
+            <Icon name="trash" />
+          </button>
         </div>
       </div>
       {readout ? <p className="axis-readout">{readout}</p> : null}

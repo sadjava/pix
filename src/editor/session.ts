@@ -1,4 +1,4 @@
-import { CHECKPOINT_MS, type CellPatch, type ClipboardPayload, type HistoryEntry, type Point, type ProjectDocument, type ToolId } from '../model/types.ts';
+import { CHECKPOINT_MS, type CellPatch, type ClipboardPayload, type HistoryEntry, type PaletteColor, type Point, type ProjectDocument, type ToolId } from '../model/types.ts';
 import { cloneCells, getCell } from './canvas/grid.ts';
 import { applyPatches, patchesForValues } from './tools/stroke.ts';
 import { floodIndices } from './tools/fill.ts';
@@ -16,7 +16,7 @@ import {
   type SelectionHandle,
   type SelectionRect,
 } from './selection/selection.ts';
-import { colorUsed, pickRecentColor, removeColor, slotOf } from './palette/palette.ts';
+import { pickRecentColor, revealColor, slotOf } from './palette/palette.ts';
 import type { TraceSprite } from './trace/trace.ts';
 
 export interface GesturePreview {
@@ -97,7 +97,7 @@ export class EditorSession {
     this.history = history;
     this.revision = revision;
     this.now = now;
-    this.colorOrder = doc.palette.map((_, index) => index + 1).slice(-8);
+    this.colorOrder = doc.palette.map((_, index) => index + 1);
     const newest = this.colorOrder[this.colorOrder.length - 1];
     if (newest && !this.colorOrder.includes(this.colorSlot)) this.colorSlot = newest;
   }
@@ -132,8 +132,12 @@ export class EditorSession {
     const picked = pickRecentColor(this.doc.palette, this.colorOrder, hex);
     if (!picked) return;
     this.colorOrder = picked.order;
+    const index = picked.slot - 1;
+    const palette = picked.palette[index]?.hidden
+      ? picked.palette.map((color, i) => i === index ? revealColor(color) : color)
+      : picked.palette;
     this.setColorSlot(picked.slot);
-    if (picked.palette !== this.doc.palette) this.setView({ palette: picked.palette });
+    if (palette !== this.doc.palette) this.setView({ palette });
   }
 
   pointerDown(cell: Point | null): void {
@@ -141,7 +145,10 @@ export class EditorSession {
     if (this.tool === 'pan' || this.tool === 'trace') return;
     if (this.tool === 'picker') {
       const slot = getCell(this.doc, cell.x, cell.y);
-      if (slot !== 0) this.setColorSlot(slot);
+      if (slot !== 0) {
+        this.setColorSlot(slot);
+        this.revealSlot(slot);
+      }
       return;
     }
     if (this.tool !== 'select') this.selection = null;
@@ -272,7 +279,9 @@ export class EditorSession {
     this.cancelGesture();
     const result = undoHistory(this.doc.cells, this.history);
     if (!result) return;
+    const entry = result.stacks.redo[result.stacks.redo.length - 1];
     this.doc = { ...this.doc, cells: result.cells };
+    this.restorePalette(entry?.paletteBefore, entry?.slotBefore);
     this.history = result.stacks;
     this.revision += 1;
     this.persist('undo', [], false);
@@ -282,7 +291,9 @@ export class EditorSession {
     this.cancelGesture();
     const result = redoHistory(this.doc.cells, this.history);
     if (!result) return;
+    const entry = result.stacks.undo[result.stacks.undo.length - 1];
     this.doc = { ...this.doc, cells: result.cells };
+    this.restorePalette(entry?.paletteAfter, entry?.slotAfter);
     this.history = result.stacks;
     this.revision += 1;
     this.persist('redo', [], false);
@@ -392,22 +403,28 @@ export class EditorSession {
     this.pasteClipped = false;
   }
 
-  deleteColor(paletteIndex: number, replacementSlot: number): boolean {
+  /** Take a swatch off the list. Stitches that already use the color stay. */
+  dismissColor(paletteIndex: number): boolean {
+    const color = this.doc.palette[paletteIndex];
+    if (!color || color.hidden) return false;
+    if (this.doc.palette.filter((item) => !item.hidden).length < 2) return false;
+    const palette = this.doc.palette.map((item, index) => index === paletteIndex ? { ...item, hidden: true } : item);
     const slot = slotOf(paletteIndex);
-    if (colorUsed(this.doc.cells, slot) && replacementSlot === slot) return false;
-    const removed = removeColor(this.doc.palette, this.doc.cells, paletteIndex, colorUsed(this.doc.cells, slot) ? replacementSlot : 0);
-    if (!removed) return false;
-    const patches: CellPatch[] = [];
-    for (let i = 0; i < this.doc.cells.length; i++) {
-      const before = this.doc.cells[i] ?? 0;
-      const after = removed.cells[i] ?? 0;
-      if (before !== after) patches.push({ index: i, before, after });
+    if (this.colorSlot === slot) {
+      const next = palette.findIndex((item) => !item.hidden);
+      this.colorSlot = slotOf(next);
     }
-    this.doc = { ...this.doc, palette: removed.palette, cells: removed.cells };
-    if (this.colorSlot === slot) this.colorSlot = replacementSlot || 1;
-    else if (this.colorSlot > slot) this.colorSlot -= 1;
-    this.commit('palette', patches, true);
+    if (this.previousSlot === slot) this.previousSlot = null;
+    this.setView({ palette });
     return true;
+  }
+
+  private revealSlot(slot: number): void {
+    const index = slot - 1;
+    const color = this.doc.palette[index];
+    if (!color?.hidden) return;
+    const palette = this.doc.palette.map((item, i) => i === index ? revealColor(item) : item);
+    this.setView({ palette });
   }
 
   setView(patch: Partial<Pick<ProjectDocument, 'gridVisible' | 'checkerVisible' | 'checkerBlock' | 'symmetry' | 'viewport' | 'palette'>>): void {
@@ -425,7 +442,7 @@ export class EditorSession {
     this.cancelGesture();
     this.doc = doc;
     this.selection = null;
-    this.colorOrder = doc.palette.map((_, index) => index + 1).slice(-8);
+    this.colorOrder = doc.palette.map((_, index) => index + 1);
     this.revision += 1;
     this.persist('replace', [], false);
   }
@@ -498,15 +515,40 @@ export class EditorSession {
     this.commit(type, patches, true);
   }
 
-  private commit(type: string, patches: CellPatch[], alreadyApplied: boolean): void {
+  private restorePalette(palette: PaletteColor[] | undefined, slot: number | undefined): void {
+    if (!palette) return;
+    this.doc = { ...this.doc, palette: palette.map((color) => ({ ...color })) };
+    if (typeof slot === 'number') this.colorSlot = slot;
+    this.previousSlot = null;
+    this.colorOrder = this.doc.palette.map((_, index) => index + 1);
+  }
+
+  private commit(
+    type: string,
+    patches: CellPatch[],
+    alreadyApplied: boolean,
+    palette?: { before: PaletteColor[]; after: PaletteColor[]; slotBefore: number; slotAfter: number },
+  ): void {
     if (!alreadyApplied) applyPatches(this.doc.cells, patches, 'forward');
-    if (patches.length === 0 && type !== 'replace') {
+    if (patches.length === 0 && type !== 'replace' && !palette) {
       this.persist(type, patches, false);
       return;
     }
     this.revision += 1;
-    if (patches.length > 0) {
-      const entry: HistoryEntry = { opNumber: this.revision, type, patches };
+    if (patches.length > 0 || palette) {
+      const entry: HistoryEntry = {
+        opNumber: this.revision,
+        type,
+        patches,
+        ...(palette
+          ? {
+              paletteBefore: palette.before,
+              paletteAfter: palette.after,
+              slotBefore: palette.slotBefore,
+              slotAfter: palette.slotAfter,
+            }
+          : {}),
+      };
       this.history = pushHistory(this.history, entry);
     }
     this.persist(type, patches, false);

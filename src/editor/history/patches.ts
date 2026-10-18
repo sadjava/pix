@@ -1,4 +1,4 @@
-import { HISTORY_LIMIT, type CellPatch, type HistoryEntry, type PackedPatches } from '../../model/types.ts';
+import { HISTORY_LIMIT, type CellPatch, type HistoryEntry, type PackedPatches, type PaletteColor } from '../../model/types.ts';
 
 const BYTE_LIMIT = 400_000;
 
@@ -30,7 +30,16 @@ export function packEntry(entry: HistoryEntry): HistoryEntry {
     before[i] = patch.before;
     after[i] = patch.after;
   }
-  return { opNumber: entry.opNumber, type: entry.type, patches: [], packed: { index, before, after } };
+  return {
+    opNumber: entry.opNumber,
+    type: entry.type,
+    patches: [],
+    packed: { index, before, after },
+    paletteBefore: entry.paletteBefore,
+    paletteAfter: entry.paletteAfter,
+    slotBefore: entry.slotBefore,
+    slotAfter: entry.slotAfter,
+  };
 }
 
 export function pushHistory(stacks: HistoryStacks, entry: HistoryEntry): HistoryStacks {
@@ -113,9 +122,10 @@ function parseEntries(raw: unknown): HistoryEntry[] | null {
     if (!item || typeof item !== 'object') return null;
     const entry = item as { opNumber?: unknown; type?: unknown; patches?: unknown; packed?: unknown };
     if (typeof entry.opNumber !== 'number' || typeof entry.type !== 'string') return null;
+    const palette = readPalettePair(item);
     const packed = readPacked(entry.packed);
     if (packed) {
-      entries.push({ opNumber: entry.opNumber, type: entry.type, patches: [], packed });
+      entries.push({ opNumber: entry.opNumber, type: entry.type, patches: [], packed, ...palette });
       continue;
     }
     if (!Array.isArray(entry.patches)) return null;
@@ -128,9 +138,33 @@ function parseEntries(raw: unknown): HistoryEntry[] | null {
       }
       patches.push({ index: cell.index, before: cell.before, after: cell.after });
     }
-    entries.push({ opNumber: entry.opNumber, type: entry.type, patches });
+    entries.push({ opNumber: entry.opNumber, type: entry.type, patches, ...palette });
   }
   return entries;
+}
+
+function readPalettePair(raw: object): Pick<HistoryEntry, 'paletteBefore' | 'paletteAfter' | 'slotBefore' | 'slotAfter'> {
+  const value = raw as { paletteBefore?: unknown; paletteAfter?: unknown; slotBefore?: unknown; slotAfter?: unknown };
+  const paletteBefore = readPalette(value.paletteBefore);
+  const paletteAfter = readPalette(value.paletteAfter);
+  return {
+    ...(paletteBefore ? { paletteBefore } : {}),
+    ...(paletteAfter ? { paletteAfter } : {}),
+    ...(typeof value.slotBefore === 'number' ? { slotBefore: value.slotBefore } : {}),
+    ...(typeof value.slotAfter === 'number' ? { slotAfter: value.slotAfter } : {}),
+  };
+}
+
+function readPalette(raw: unknown): PaletteColor[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const colors: PaletteColor[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') return undefined;
+    const color = item as { id?: unknown; name?: unknown; hex?: unknown };
+    if (typeof color.id !== 'string' || typeof color.name !== 'string' || typeof color.hex !== 'string') return undefined;
+    colors.push({ id: color.id, name: color.name, hex: color.hex });
+  }
+  return colors;
 }
 
 function readPacked(raw: unknown): PackedPatches | null {

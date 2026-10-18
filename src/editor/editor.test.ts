@@ -325,7 +325,7 @@ describe('recent colors', () => {
     expect(added?.palette[0]).toBe(palette[0]);
   });
 
-  it('keeps the last 8 colors by overwriting the oldest swatch', () => {
+  it('appends a new color and leaves the oldest hex on the canvas', () => {
     let palette = createDocument(2, 2).palette;
     let order = [1];
     for (let i = 0; i < 7; i++) {
@@ -335,12 +335,38 @@ describe('recent colors', () => {
       order = picked!.order;
     }
     expect(palette).toHaveLength(8);
-    const dropped = pickRecentColor(palette, order, '#abcdef');
-    expect(dropped?.palette).toHaveLength(8);
-    expect(dropped?.palette[0]?.hex).toBe('#abcdef');
-    expect(dropped?.palette.some((color) => color.hex === '#1a1614')).toBe(false);
-    expect(dropped?.slot).toBe(1);
-    expect(dropped?.order[7]).toBe(1);
+    const added = pickRecentColor(palette, order, '#abcdef');
+    expect(added?.palette).toHaveLength(9);
+    expect(added?.palette[0]?.hex).toBe('#1a1614');
+    expect(added?.slot).toBe(9);
+    expect(added?.order).toHaveLength(9);
+    expect(added?.order[0]).toBe(1);
+  });
+});
+
+describe('recolor and delete', () => {
+  it('does not recolor the canvas when a new color is chosen', () => {
+    const editor = session();
+    editor.doc.cells[0] = 1;
+    editor.useColor('#112233');
+    expect(editor.doc.cells[0]).toBe(1);
+    expect(editor.doc.palette[0]?.hex).toBe('#1a1614');
+    expect(editor.doc.palette[1]?.hex).toBe('#112233');
+    expect(editor.colorSlot).toBe(2);
+  });
+
+  it('hides a used color from the list and leaves the stitches', () => {
+    const editor = session();
+    editor.doc.palette.push({ id: 'clay', name: 'Глина', hex: '#be6437' });
+    editor.doc.cells[0] = 1;
+    editor.doc.cells[1] = 2;
+    editor.setColorSlot(1);
+    expect(editor.dismissColor(0)).toBe(true);
+    expect(editor.doc.palette[0]?.hidden).toBe(true);
+    expect(editor.doc.palette[0]?.hex).toBe('#1a1614');
+    expect(editor.doc.cells[0]).toBe(1);
+    expect(editor.doc.cells[1]).toBe(2);
+    expect(editor.colorSlot).toBe(2);
   });
 });
 

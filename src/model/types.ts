@@ -12,6 +12,8 @@ export interface PaletteColor {
   id: string;
   name: string;
   hex: string;
+  /** Dropped from the swatch list. Stitches that already use it stay. */
+  hidden?: boolean;
 }
 
 export type SymmetryMode = 'off' | 'vertical' | 'horizontal' | 'both';
@@ -87,6 +89,11 @@ export interface HistoryEntry {
   patches: CellPatch[];
   /** Large edits, such as a fill, stay undoable without one object per cell. */
   packed?: PackedPatches;
+  /** Set when the edit also changes which colors exist. Undo restores both. */
+  paletteBefore?: PaletteColor[];
+  paletteAfter?: PaletteColor[];
+  slotBefore?: number;
+  slotAfter?: number;
 }
 
 export interface JournalEntry {

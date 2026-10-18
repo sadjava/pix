@@ -12,11 +12,9 @@ export function defaultPalette(): PaletteColor[] {
   return [{ id: 'ink', name: 'Чернь', hex: '#1a1614' }];
 }
 
-const RECENT_COLORS = 8;
-
 /**
- * Recent colors, newest at the end of `order` (slot numbers).
- * ponytail: the list stops at 8. A new color overwrites the oldest slot's hex, so cell numbers stay put.
+ * Newest slot last in `order`.
+ * A new hex is appended. It never rewrites an older slot, because those numbers are already on the canvas.
  */
 export function pickRecentColor(
   palette: PaletteColor[],
@@ -28,27 +26,22 @@ export function pickRecentColor(
   const existing = palette.findIndex((color) => color.hex === normalized);
   if (existing >= 0) {
     const slot = slotOf(existing);
-    return { palette, order: [...order.filter((item) => item !== slot), slot].slice(-RECENT_COLORS), slot };
+    return { palette, order: [...order.filter((item) => item !== slot), slot], slot };
   }
-  if (palette.length < RECENT_COLORS) {
-    const next = [...palette, { id: crypto.randomUUID(), name: normalized, hex: normalized }];
-    const slot = slotOf(next.length - 1);
-    return { palette: next, order: [...order, slot].slice(-RECENT_COLORS), slot };
-  }
-  const oldest = order[0] ?? 1;
-  const index = paletteIndexOf(oldest);
-  const current = palette[index];
-  if (!current) return null;
-  const next = palette.map((color, i) => (i === index ? { ...color, name: normalized, hex: normalized } : color));
-  return { palette: next, order: [...order.slice(1), oldest], slot: oldest };
+  const next = [...palette, { id: crypto.randomUUID(), name: normalized, hex: normalized }];
+  const slot = slotOf(next.length - 1);
+  return { palette: next, order: [...order, slot], slot };
+}
+
+export function revealColor(color: PaletteColor): PaletteColor {
+  if (!color.hidden) return color;
+  const next = { ...color };
+  delete next.hidden;
+  return next;
 }
 
 export function slotOf(paletteIndex: number): number {
   return paletteIndex + 1;
-}
-
-export function paletteIndexOf(slot: number): number {
-  return slot - 1;
 }
 
 export function colorUsed(cells: Uint16Array, slot: number): boolean {

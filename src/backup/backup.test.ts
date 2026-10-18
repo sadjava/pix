@@ -7,7 +7,7 @@ import { canReadBackup, canWriteBackup } from './rls.ts';
 import { MemoryTransport } from './memoryTransport.ts';
 import { drainOutbox, enqueueBackup, rememberDeleted, syncAccount } from './outbox.ts';
 import { applyBackupSuccess, decideSync } from './protocol.ts';
-import { documentFromRow, rugFromDocument } from './restore.ts';
+import { documentFromRow, rugFromDocument, unpackSymmetry, packSymmetry } from './restore.ts';
 import { BackupScheduler, backoffMs } from './scheduler.ts';
 
 beforeEach(() => {
@@ -135,6 +135,45 @@ describe('database sync', () => {
     expect('doc' in local && local.doc.cells[0]).toBe(1);
     expect(local && 'record' in local && local.record.syncState).toBe('backed-up');
     repo.close();
+  });
+
+  it('sends a tracing picture with the rug and restores it on the other device', async () => {
+    const repo = ProjectRepository.open('trace-sync');
+    const created = await repo.create({ name: 'Рисунок', width: 4, height: 4 });
+    const bytes = new TextEncoder().encode('img');
+    await repo.putTrace({
+      id: 'pic',
+      projectId: created.record.id,
+      blob: new Blob([bytes], { type: 'image/png' }),
+      x: 1,
+      y: 2,
+      width: 10,
+      height: 8,
+      rotation: 0,
+      opacity: 0.5,
+      cropX: 0,
+      cropY: 0,
+      cropW: 1,
+      cropH: 1,
+    });
+    const published = await repo.publishTraces(created.record.id);
+    expect(published?.documentRevision).toBe(2);
+    const transport = new MemoryTransport();
+    await enqueueBackup(repo, published ?? created.record);
+    await drainOutbox(repo, transport, 'owner-1', '2026-10-18T08:00:00.000Z');
+    const sent = transport.rows.get(created.record.id);
+    expect(sent?.traces).toHaveLength(1);
+    expect(sent?.traces[0]?.data).toBe(btoa('img'));
+    const packed = packSymmetry(sent?.symmetry ?? created.doc.symmetry, sent?.traces ?? []);
+    expect(unpackSymmetry(packed).traces[0]?.id).toBe('pic');
+    expect(unpackSymmetry(packed).symmetry).not.toHaveProperty('traces');
+    const other = ProjectRepository.open('trace-sync-other');
+    await syncAccount(other, transport, 'owner-1', '2026-10-18T08:01:00.000Z');
+    const restored = await other.listTraces(created.record.id);
+    expect(restored).toHaveLength(1);
+    expect(await restored[0]?.blob.text()).toBe('img');
+    repo.close();
+    other.close();
   });
 
   it('deletes the cloud row and does not pull the rug back', async () => {

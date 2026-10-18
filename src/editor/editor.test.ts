@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backingStoreSize, gestureViewport, resizeViewport, screenToCell, zoomAt } from './canvas/coords.ts';
+import { backingStoreSize, containViewport, gestureViewport, resizeViewport, screenToCell, zoomAt } from './canvas/coords.ts';
 import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
@@ -51,6 +51,17 @@ describe('coordinates', () => {
     const after = screenToCell(rect.left + 40, rect.top + 50, rect, zoomed, 1);
     expect(zoomed.scale).toBe(4);
     expect(after).toEqual(before);
+  });
+
+  it('fits the rug again when a saved pan leaves the view', () => {
+    const lost = { scale: 12, panX: 31_491, panY: 1_088_214_204, cellSize: 16 };
+    const next = containViewport(lost, 800, 600, 100, 100);
+    const drawH = 100 * 16 * next.scale;
+    expect(next.panY + drawH).toBeGreaterThan(0);
+    expect(next.panY).toBeLessThan(600);
+    const kept = containViewport({ scale: 1, panX: -10, panY: 20, cellSize: 16 }, 400, 300, 8, 8);
+    expect(kept.panX).toBe(-10);
+    expect(kept.panY).toBe(20);
   });
 });
 

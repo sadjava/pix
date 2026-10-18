@@ -17,6 +17,24 @@ export interface RugRow {
   checkerBlock: number;
   symmetry: SymmetrySettings;
   contentHash: string;
+  /** Tracing pictures. On the wire they ride inside the symmetry column. */
+  traces: CloudTrace[];
+}
+
+export interface CloudTrace {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+  cropX: number;
+  cropY: number;
+  cropW: number;
+  cropH: number;
+  mime: string;
+  data: string;
 }
 
 /** Enough to notice a remote rug without downloading its cells. */

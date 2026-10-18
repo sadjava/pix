@@ -55,7 +55,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [tracePop, setTracePop] = useState<number | null>(null);
   const colorTimer = useRef(0);
   const traceTimer = useRef(0);
-  const traceFileRef = useRef<HTMLInputElement>(null);
   const refresh = () => setFrame((value) => value + 1);
 
   useEffect(() => {
@@ -97,6 +96,21 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
         }
         editor.traces = sprites;
         refresh();
+        if (sprites.length === 0 || cancel) return;
+        const stampKey = `traceRevision:${id}`;
+        const stamp = await repository.readMeta<number>(stampKey);
+        if (cancel || stamp === editor.revision) return;
+        const published = await repository.publishTraces(id);
+        if (cancel || !published) return;
+        editor.revision = Math.max(editor.revision, published.documentRevision);
+        setRecord(published);
+        const enabled = await repository.readMeta<boolean>('backupEnabled');
+        const next = enabled ? await backupNow(published, editor) : null;
+        if (!enabled || next?.syncState === 'backed-up' || published.syncState === 'local-only') {
+          await repository.writeMeta(stampKey, editor.revision);
+        }
+        if (next) setRecord(next);
+        refresh();
       });
       const xEven = loaded.doc.symmetry.axisX2 % 2 === 0;
       const yEven = loaded.doc.symmetry.axisY2 % 2 === 0;
@@ -136,20 +150,29 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
       if (!editor || editor.tool !== 'trace' || !editor.activeTraceId) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
       event.preventDefault();
-      void forgetTrace(editor, editor.activeTraceId, refresh);
+      void forgetTrace(editor, editor.activeTraceId).then(async () => {
+        const published = await repository.publishTraces(id);
+        if (published) {
+          editor.revision = Math.max(editor.revision, published.documentRevision);
+          setRecord(published);
+          const next = await backupNow(published, editor);
+          if (next) setRecord(next);
+        }
+        refresh();
+      });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [id]);
 
   useEffect(() => {
     const editor = sessionRef.current;
     if (!editor || !record) return;
     const timer = window.setTimeout(() => {
-      void backupNow(record, editor);
+      void backupNow(record, editor).then(applyBackup);
     }, 15_000);
     const onLine = () => {
-      void backupNow(record, editor);
+      void backupNow(record, editor).then(applyBackup);
     };
     window.addEventListener('online', onLine);
     return () => {
@@ -157,6 +180,26 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
       window.removeEventListener('online', onLine);
     };
   }, [record]);
+
+  const applyBackup = (next: ProjectRecord | null) => {
+    if (!next) return;
+    setRecord(next);
+    refresh();
+  };
+
+  const publishPictures = async () => {
+    const editor = sessionRef.current;
+    if (!editor) return;
+    const published = await repository.publishTraces(id);
+    if (!published) return;
+    editor.revision = Math.max(editor.revision, published.documentRevision);
+    setRecord(published);
+    const next = await backupNow(published, editor);
+    if (next?.syncState === 'backed-up' || published.syncState === 'local-only') {
+      await repository.writeMeta(`traceRevision:${id}`, editor.revision);
+    }
+    applyBackup(next);
+  };
 
   if (!session || !record) {
     return <p className="status">{error ?? ru.saving}</p>;
@@ -304,7 +347,25 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
       ) : null}
       {tracePop !== null ? (
         <div className="size-pop trace-pop" style={{ top: tracePop }}>
-          <button type="button" onClick={() => traceFileRef.current?.click()}>{ru.traceAdd}</button>
+          <label className="trace-add">
+            {ru.traceAdd}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(event) => {
+                // Chrome drops a live FileList when the input is cleared. Firefox keeps it.
+                const files = [...(event.currentTarget.files ?? [])];
+                event.currentTarget.value = '';
+                if (files.length > 0) {
+                  void addTraces(session, id, files, refresh, setError).then((added) => {
+                    if (added > 0) return publishPictures();
+                    return undefined;
+                  });
+                }
+              }}
+            />
+          </label>
           {activeTrace ? (
             <>
               <input
@@ -317,30 +378,21 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
                   activeTrace.opacity = Number(event.target.value) / 100;
                   refresh();
                   window.clearTimeout(traceTimer.current);
-                  traceTimer.current = window.setTimeout(() => void repository.putTrace(traceRow(id, activeTrace)), 200);
+                  const picture = activeTrace;
+                  traceTimer.current = window.setTimeout(() => {
+                    void repository.putTrace(traceRow(id, picture)).then(() => publishPictures());
+                  }, 200);
                 }}
               />
-              <button type="button" className="icon-btn" aria-label={ru.traceDelete} title={ru.traceDelete} onClick={() => void forgetTrace(session, activeTrace.id, refresh)}>
+              <button type="button" className="icon-btn" aria-label={ru.traceDelete} title={ru.traceDelete} onClick={() => void forgetTrace(session, activeTrace.id).then(() => publishPictures())}>
                 <Icon name="trash" />
               </button>
             </>
           ) : null}
         </div>
       ) : null}
-      <input
-        ref={traceFileRef}
-        className="trace-file"
-        type="file"
-        accept="image/*"
-        multiple
-        onChange={(event) => {
-          const files = event.target.files;
-          event.target.value = '';
-          if (files && files.length > 0) void addTraces(session, id, files, refresh, setError);
-        }}
-      />
       <div className="stage">
-        <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} onTrace={(sprite) => void repository.putTrace(traceRow(id, sprite))} />
+        <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} onTrace={(sprite) => void repository.putTrace(traceRow(id, sprite)).then(() => publishPictures())} />
       </div>
       <aside className="side" inert={!panelOpen}>
         {error ? <p className="warning">{error}</p> : null}
@@ -451,7 +503,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.exportPng} title={ru.exportPng} onClick={() => setPngOpen(true)}><Icon name="image" /></button>
             <button type="button" className="icon-btn" aria-label={ru.exportJson} title={ru.exportJson} onClick={() => download(new TextEncoder().encode(exportProjectFile(record.id, record.name, session.doc)), `${record.name}.json`, 'application/json')}><Icon name="file" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.backupRetry} title={ru.backupRetry} onClick={() => void backupNow(record, session)}><Icon name="cloud" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.backupRetry} title={ru.backupRetry} onClick={() => void backupNow(record, session).then(applyBackup)}><Icon name="cloud" /></button>
           </div>
         </section>
       </aside>
@@ -600,18 +652,47 @@ function backupLabel(state: ProjectRecord['syncState']): string {
   return ru.backupOff;
 }
 
-async function backupNow(record: ProjectRecord, session: EditorSession): Promise<void> {
+async function backupNow(record: ProjectRecord, session: EditorSession): Promise<ProjectRecord | null> {
   const url = import.meta.env.VITE_SUPABASE_URL;
   const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const ownerId = await repository.readMeta<string>('backupUserId');
   const enabled = await repository.readMeta<boolean>('backupEnabled');
-  if (!url || !publishableKey || !ownerId || !enabled || session.gesture || !navigator.onLine) return;
-  const cloudTime = record.lastCloudBackupAt ?? '';
-  if (record.syncState === 'backed-up' && record.documentRevision === session.revision && record.updatedAt <= cloudTime) return;
+  if (!url || !publishableKey || !ownerId || !enabled || session.gesture || !navigator.onLine) return null;
   await enqueueBackup(repository, { ...record, documentRevision: session.revision });
   const { createSupabaseTransport } = await import('../backup/supabase/adapter.ts');
   const transport = await createSupabaseTransport({ url, publishableKey, ownerId });
   await drainOutbox(repository, transport, ownerId, new Date().toISOString());
+  const loaded = await repository.load(record.id);
+  if ('doc' in loaded && loaded.record.documentRevision > session.revision && !session.gesture) {
+    session.selection = null;
+    session.pasteOrigin = null;
+    session.doc = loaded.doc;
+    session.history = loaded.history;
+    session.revision = loaded.record.documentRevision;
+  }
+  const adopted = await adoptTraces(session, record.id);
+  const fresh = await repository.db.projects.get(record.id);
+  if (!fresh) return null;
+  if (adopted || fresh.documentRevision !== record.documentRevision || fresh.syncState !== record.syncState) return fresh;
+  return null;
+}
+
+async function adoptTraces(session: EditorSession, projectId: string): Promise<boolean> {
+  const rows = await repository.listTraces(projectId);
+  const same = rows.length === session.traces.length && rows.every((row) => session.traces.some((sprite) => sprite.id === row.id));
+  if (same) return false;
+  for (const sprite of session.traces) closeImage(sprite.image);
+  const sprites: TraceSprite[] = [];
+  for (const row of rows) {
+    try {
+      sprites.push(spriteFromRow(row, await createImageBitmap(row.blob)));
+    } catch {
+      // A picture this browser cannot decode stays out of the way.
+    }
+  }
+  session.traces = sprites;
+  if (!sprites.some((sprite) => sprite.id === session.activeTraceId)) session.activeTraceId = null;
+  return true;
 }
 
 function download(bytes: Uint8Array, name: string, type: string): void {
@@ -658,26 +739,25 @@ function traceRow(projectId: string, sprite: TraceSprite): TraceRow {
   };
 }
 
-async function forgetTrace(session: EditorSession, traceId: string, done: () => void): Promise<void> {
+async function forgetTrace(session: EditorSession, traceId: string): Promise<void> {
   const index = session.traces.findIndex((trace) => trace.id === traceId);
   if (index < 0) return;
   const [sprite] = session.traces.splice(index, 1);
   if (session.activeTraceId === traceId) session.activeTraceId = null;
   closeImage(sprite?.image ?? null);
   await repository.deleteTrace(traceId);
-  done();
 }
 
 async function addTraces(
   session: EditorSession,
   projectId: string,
-  files: FileList,
+  files: readonly File[],
   done: () => void,
   fail: (text: string) => void,
-): Promise<void> {
+): Promise<number> {
   let added = 0;
   for (const file of files) {
-    if (!file.type.startsWith('image/')) continue;
+    if (file.type && !file.type.startsWith('image/') && file.type !== 'application/octet-stream') continue;
     try {
       const prepared = await traceBitmap(file);
       const frame = fitFrame(session.doc.width, session.doc.height, prepared.image.width, prepared.image.height);
@@ -703,14 +783,15 @@ async function addTraces(
   }
   if (added > 0) session.setTool('trace');
   done();
+  return added;
 }
 
 async function traceBitmap(file: Blob): Promise<{ blob: Blob; image: ImageBitmap }> {
-  const source = await createImageBitmap(file);
+  const source = await decodeTrace(file);
   const edge = Math.max(source.width, source.height);
-  // ponytail: long edge capped at 1600px. Keeping the original file would replace the cap.
-  if (edge <= TRACE_EDGE) return { blob: file, image: source };
-  const scale = TRACE_EDGE / edge;
+  // ponytail: long edge capped at 1600px so a phone photo does not exhaust the tablet.
+  if (edge < TRACE_EDGE && file.size > 0 && file.size < 1_500_000) return { blob: file, image: source };
+  const scale = Math.min(1, TRACE_EDGE / edge);
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(source.width * scale));
   canvas.height = Math.max(1, Math.round(source.height * scale));
@@ -725,6 +806,34 @@ async function traceBitmap(file: Blob): Promise<{ blob: Blob; image: ImageBitmap
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
   if (!blob) throw new Error('blob');
   return { blob, image: await createImageBitmap(blob) };
+}
+
+async function decodeTrace(file: Blob): Promise<ImageBitmap> {
+  try {
+    return await createImageBitmap(file, { resizeWidth: TRACE_EDGE, resizeQuality: 'medium' });
+  } catch {
+    try {
+      return await createImageBitmap(file);
+    } catch {
+      return bitmapFromImage(file);
+    }
+  }
+}
+
+function bitmapFromImage(file: Blob): Promise<ImageBitmap> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      createImageBitmap(image).then(resolve, reject);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('image'));
+    };
+    image.src = url;
+  });
 }
 
 function closeImage(image: CanvasImageSource | null): void {

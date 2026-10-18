@@ -6,7 +6,7 @@ import { ru } from '../../i18n/ru.ts';
 import { axisLabel } from '../symmetry/axisLabel.ts';
 import { Icon } from '../icons.tsx';
 import { selectionSizeLabel } from '../session.ts';
-import { axis2FromCellSpace, backingStoreSize, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
+import { axis2FromCellSpace, backingStoreSize, containViewport, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
 import type { SelectionHandle, SelectionRect } from '../selection/selection.ts';
 import { gripAt, placeTrace, type SourceCrop, type TraceFrame, type TraceGrip, type TraceSprite } from '../trace/trace.ts';
 
@@ -63,15 +63,18 @@ export function CanvasView({
       sizeRef.current = { width: rect.width, height: rect.height };
       if (!fitted.current && !untouched) {
         fitted.current = true;
-        draw(wrap, pixelRef.current, overlayRef.current, session, axisDrag.current);
+        const contained = containViewport(viewport, rect.width, rect.height, session.doc.width, session.doc.height);
+        const moved = contained.panX !== viewport.panX || contained.panY !== viewport.panY || contained.scale !== viewport.scale;
+        if (moved) remember(session, contained, onChange, saveTimer, wrap);
+        else draw(wrap, pixelRef.current, overlayRef.current, session, axisDrag.current);
         return;
       }
       fitted.current = true;
       const next = previous.width === 0 && untouched
         ? fitViewport(rect.width, rect.height, session.doc.width, session.doc.height, viewport.cellSize)
         : resizeViewport(viewport, previous.width === 0 ? rect : previous, { width: rect.width, height: rect.height });
-      if (previous.width === 0 && untouched) remember(session, next, onChange, saveTimer);
-      else if (previous.width !== 0) remember(session, next, onChange, saveTimer);
+      if (previous.width === 0 && untouched) remember(session, next, onChange, saveTimer, wrap);
+      else if (previous.width !== 0) remember(session, next, onChange, saveTimer, wrap);
     });
     observer.observe(wrap);
     return () => observer.disconnect();
@@ -89,7 +92,7 @@ export function CanvasView({
         event.clientY - rect.top,
         session.doc.viewport.scale * (event.deltaY < 0 ? 1.1 : 0.9),
       );
-      remember(session, viewport, onChange, saveTimer);
+      remember(session, viewport, onChange, saveTimer, wrap);
     };
     const blockTouch = (event: TouchEvent) => {
       if (event.touches.length > 0) event.preventDefault();
@@ -151,6 +154,7 @@ export function CanvasView({
       fitViewport(rect.width, rect.height, session.doc.width, session.doc.height, session.doc.viewport.cellSize),
       onChange,
       saveTimer,
+      wrap,
     );
   }
 
@@ -158,7 +162,7 @@ export function CanvasView({
     const wrap = wrapRef.current;
     if (!wrap) return;
     const rect = wrap.getBoundingClientRect();
-    remember(session, zoomAt(session.doc.viewport, rect.width / 2, rect.height / 2, 1), onChange, saveTimer);
+    remember(session, zoomAt(session.doc.viewport, rect.width / 2, rect.height / 2, 1), onChange, saveTimer, wrap);
   }
 
   const cursor = axisCursor === 'vertical'
@@ -255,7 +259,7 @@ export function CanvasView({
           const gesture = fingerPair(pointers.current, pixelRef.current);
           const start = pinch.current;
           if (gesture && start) {
-            remember(session, gestureViewport(start.viewport, start, gesture.midX, gesture.midY, gesture.distance), onChange, saveTimer);
+            remember(session, gestureViewport(start.viewport, start, gesture.midX, gesture.midY, gesture.distance), onChange, saveTimer, wrapRef.current);
           }
           return;
         }
@@ -270,7 +274,7 @@ export function CanvasView({
         if (panning.current) {
           const viewport = panBy(session.doc.viewport, event.clientX - lastPan.current.x, event.clientY - lastPan.current.y);
           lastPan.current = { x: event.clientX, y: event.clientY };
-          remember(session, viewport, onChange, saveTimer);
+          remember(session, viewport, onChange, saveTimer, wrapRef.current);
           return;
         }
         const tracing = traceDrag.current;
@@ -431,8 +435,13 @@ function remember(
   viewport: Viewport,
   onChange: () => void,
   saveTimer: { current: number },
+  wrap: HTMLElement | null,
 ): void {
-  session.doc = { ...session.doc, viewport };
+  const rect = wrap?.getBoundingClientRect();
+  const next = rect && rect.width > 1 && rect.height > 1
+    ? containViewport(viewport, rect.width, rect.height, session.doc.width, session.doc.height)
+    : viewport;
+  session.doc = { ...session.doc, viewport: next };
   onChange();
   window.clearTimeout(saveTimer.current);
   saveTimer.current = window.setTimeout(() => session.setView({ viewport: session.doc.viewport }), 400);

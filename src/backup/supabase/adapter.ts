@@ -1,5 +1,6 @@
-import type { PaletteColor, SymmetrySettings } from '../../model/types.ts';
+import type { PaletteColor } from '../../model/types.ts';
 import type { RugRef, RugRow, SyncTransport } from '../protocol.ts';
+import { packSymmetry, unpackSymmetry } from '../restore.ts';
 
 export interface SupabaseConfig {
   url: string;
@@ -105,7 +106,7 @@ function toRow(row: RugRow): Record<string, unknown> {
     grid_visible: row.gridVisible,
     checker_visible: row.checkerVisible,
     checker_block: row.checkerBlock,
-    symmetry: row.symmetry,
+    symmetry: packSymmetry(row.symmetry, row.traces ?? []),
     content_hash: row.contentHash,
   };
 }
@@ -122,6 +123,7 @@ function refFromRow(row: Record<string, unknown>): RugRef {
 }
 
 function fromRow(row: Record<string, unknown>): RugRow {
+  const packed = unpackSymmetry(row.symmetry);
   return {
     id: String(row.id),
     ownerId: String(row.owner_id),
@@ -136,7 +138,8 @@ function fromRow(row: Record<string, unknown>): RugRow {
     gridVisible: Boolean(row.grid_visible),
     checkerVisible: Boolean(row.checker_visible),
     checkerBlock: Number(row.checker_block),
-    symmetry: row.symmetry as SymmetrySettings,
+    symmetry: packed.symmetry,
     contentHash: String(row.content_hash),
+    traces: packed.traces,
   };
 }

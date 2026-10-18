@@ -113,7 +113,6 @@ export class ProjectRepository {
     const history = emptyHistory();
     const traces = await this.listTraces(id);
     await this.write(record, loaded.doc, history);
-    // ponytail: the picture bytes stay in this browser. A cloud blob would replace that for a second device.
     await this.db.traces.bulkPut(traces.map((row) => ({ ...row, id: crypto.randomUUID(), projectId: record.id })));
     return { record, doc: loaded.doc, history };
   }
@@ -128,6 +127,32 @@ export class ProjectRepository {
 
   async deleteTrace(id: string): Promise<void> {
     await this.db.traces.delete(id);
+  }
+
+  async replaceTraces(projectId: string, rows: TraceRow[]): Promise<void> {
+    await this.db.transaction('rw', this.db.traces, async () => {
+      await this.db.traces.where('projectId').equals(projectId).delete();
+      if (rows.length > 0) await this.db.traces.bulkPut(rows);
+    });
+  }
+
+  /** A picture change is a new revision, so the other device pulls it with the rug. */
+  async publishTraces(id: string): Promise<ProjectRecord | null> {
+    return this.db.transaction('rw', this.db.projects, this.db.snapshots, async () => {
+      const existing = await this.db.projects.get(id);
+      if (!existing) return null;
+      const now = new Date().toISOString();
+      const record: ProjectRecord = {
+        ...existing,
+        documentRevision: existing.documentRevision + 1,
+        updatedAt: now,
+        lastLocalSavedAt: now,
+        syncState: existing.syncState === 'local-only' ? 'local-only' : 'pending',
+      };
+      await this.db.projects.put(record);
+      await this.db.snapshots.update(id, { revision: record.documentRevision });
+      return record;
+    });
   }
 
   async remove(id: string): Promise<void> {

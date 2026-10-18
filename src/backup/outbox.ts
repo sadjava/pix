@@ -1,10 +1,10 @@
 import type { ProjectRecord } from '../model/types.ts';
-import type { OutboxRow } from '../data/db.ts';
+import type { OutboxRow, TraceRow } from '../data/db.ts';
 import type { ProjectRepository } from '../data/repository.ts';
 import { emptyHistory } from '../editor/history/patches.ts';
-import { applyBackupSuccess, decideSync, syncedRevision, type SyncTransport } from './protocol.ts';
+import { applyBackupSuccess, decideSync, syncedRevision, type CloudTrace, type SyncTransport } from './protocol.ts';
 import { backoffMs } from './scheduler.ts';
-import { documentFromRow, rugFromDocument } from './restore.ts';
+import { base64ToBytes, bytesToBase64, documentFromRow, rugFromDocument } from './restore.ts';
 
 export async function enqueueBackup(repo: ProjectRepository, record: ProjectRecord): Promise<OutboxRow> {
   const pending = (await repo.listOutbox(record.id))[0];
@@ -58,6 +58,7 @@ export async function drainOutbox(
       continue;
     }
     if (decision === 'conflict' || (decision === 'pull' && !allowPull)) {
+      if (decision === 'conflict') await keepRemotePictures(repo, transport, record.id);
       await repo.db.projects.put({ ...record, syncState: 'conflict' });
       await repo.deleteOutbox(queued.id);
       continue;
@@ -82,6 +83,7 @@ export async function drainOutbox(
           lastCloudBackupAt: row.updatedAt,
         },
       });
+      await repo.replaceTraces(record.id, traceRows(record.id, row.traces));
       await repo.deleteOutbox(queued.id);
       continue;
     }
@@ -91,7 +93,7 @@ export async function drainOutbox(
       continue;
     }
     try {
-      const row = await rugFromDocument(ownerId, loaded.record, loaded.doc);
+      const row = await rugFromDocument(ownerId, loaded.record, loaded.doc, await cloudTraces(await repo.listTraces(loaded.record.id)));
       await transport.upsert(row);
       await repo.deleteOutbox(queued.id);
       const fresh = await repo.db.projects.get(record.id);
@@ -173,7 +175,68 @@ export async function syncAccount(
         lastCloudBackupAt: row.updatedAt,
       },
     });
+    await repo.replaceTraces(row.id, traceRows(row.id, row.traces));
   }
+}
+
+async function keepRemotePictures(repo: ProjectRepository, transport: SyncTransport, projectId: string): Promise<void> {
+  const local = await repo.listTraces(projectId);
+  if (local.length > 0) return;
+  try {
+    const remote = await transport.get(projectId);
+    if (remote && remote.traces.length > 0) await repo.replaceTraces(projectId, traceRows(projectId, remote.traces));
+  } catch {
+    // The stitches stay in conflict. The pictures can arrive on the next sync.
+  }
+}
+
+async function cloudTraces(rows: TraceRow[]): Promise<CloudTrace[]> {
+  const traces: CloudTrace[] = [];
+  for (const row of rows) {
+    const bytes = new Uint8Array(await row.blob.arrayBuffer());
+    traces.push({
+      id: row.id,
+      x: row.x,
+      y: row.y,
+      width: row.width,
+      height: row.height,
+      rotation: row.rotation,
+      opacity: row.opacity,
+      cropX: row.cropX,
+      cropY: row.cropY,
+      cropW: row.cropW,
+      cropH: row.cropH,
+      mime: row.blob.type || 'image/jpeg',
+      data: bytesToBase64(bytes),
+    });
+  }
+  return traces;
+}
+
+function traceRows(projectId: string, traces: CloudTrace[]): TraceRow[] {
+  const rows: TraceRow[] = [];
+  for (const trace of traces) {
+    const bytes = base64ToBytes(trace.data);
+    if (!bytes) continue;
+    const copy = new Uint8Array(bytes.byteLength);
+    copy.set(bytes);
+    rows.push({
+      id: trace.id,
+      projectId,
+      blob: new Blob([copy], { type: trace.mime }),
+      x: trace.x,
+      y: trace.y,
+      width: trace.width,
+      height: trace.height,
+      rotation: trace.rotation,
+      opacity: trace.opacity,
+      cropX: trace.cropX,
+      cropY: trace.cropY,
+      cropW: trace.cropW,
+      cropH: trace.cropH,
+    });
+  }
+  return rows;
 }
 
 async function fail(repo: ProjectRepository, queued: OutboxRow, record: ProjectRecord): Promise<void> {

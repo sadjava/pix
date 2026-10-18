@@ -65,6 +65,40 @@ export function panBy(viewport: Viewport, dx: number, dy: number): Viewport {
   return { ...viewport, panX: viewport.panX + dx, panY: viewport.panY + dy };
 }
 
+/** Keep some of the rug inside the view. A pan that misses the view entirely is fitted again. */
+export function containViewport(
+  viewport: Viewport,
+  viewWidth: number,
+  viewHeight: number,
+  gridWidth: number,
+  gridHeight: number,
+): Viewport {
+  const cellSize = viewport.cellSize > 0 ? viewport.cellSize : 16;
+  if (!Number.isFinite(viewport.panX) || !Number.isFinite(viewport.panY) || viewWidth < 2 || viewHeight < 2) {
+    return fitViewport(Math.max(viewWidth, 2), Math.max(viewHeight, 2), gridWidth, gridHeight, cellSize);
+  }
+  const scale = clampScale(viewport.scale);
+  const drawW = gridWidth * cellSize * scale;
+  const drawH = gridHeight * cellSize * scale;
+  const outside = viewport.panX + drawW <= 0 || viewport.panY + drawH <= 0 || viewport.panX >= viewWidth || viewport.panY >= viewHeight;
+  if (outside) return fitViewport(viewWidth, viewHeight, gridWidth, gridHeight, cellSize);
+  return {
+    ...viewport,
+    scale,
+    cellSize,
+    panX: clampEdge(viewport.panX, drawW, viewWidth),
+    panY: clampEdge(viewport.panY, drawH, viewHeight),
+  };
+}
+
+function clampEdge(pan: number, draw: number, view: number): number {
+  const margin = Math.min(64, Math.max(16, Math.min(draw, view) / 2));
+  const lo = margin - draw;
+  const hi = view - margin;
+  if (lo > hi) return (view - draw) / 2;
+  return Math.min(hi, Math.max(lo, pan));
+}
+
 /** Two fingers: a shared drag pans, a change in distance zooms around the first midpoint. */
 export function gestureViewport(
   start: Viewport,

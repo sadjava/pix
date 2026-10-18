@@ -46,6 +46,9 @@ export function CanvasView({
   const space = useRef(false);
   const [readout, setReadout] = useState<string | null>(null);
   const [axisCursor, setAxisCursor] = useState<AxisName | null>(null);
+  const [draftHex, setDraftHex] = useState<string | null>(null);
+  const colorTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(colorTimer.current), []);
 
   useEffect(() => {
     draw(wrapRef.current, pixelRef.current, overlayRef.current, session, axisDrag.current);
@@ -378,24 +381,61 @@ export function CanvasView({
     >
       <canvas ref={pixelRef} />
       <canvas ref={overlayRef} className="overlay" />
-      <div className="color-pair" onPointerDown={(event) => event.stopPropagation()}>
-        <button
-          type="button"
-          className="color-prev"
-          style={session.previousSlot ? { background: session.doc.palette[session.previousSlot - 1]?.hex ?? '#1a1614' } : undefined}
-          aria-label={ru.previousColor}
-          title={ru.previousColor}
-          disabled={session.previousSlot == null}
-          onClick={() => { session.swapColors(); onChange(); }}
-        />
-        <button
-          type="button"
-          className="color-now"
-          style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614' }}
-          aria-label={ru.currentColor}
-          title={ru.currentColor}
-          onClick={() => { session.swapColors(); onChange(); }}
-        />
+      <div className="color-dock" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="color-pair">
+          <button
+            type="button"
+            className="color-prev"
+            style={session.previousSlot ? { background: session.doc.palette[session.previousSlot - 1]?.hex ?? '#1a1614' } : undefined}
+            aria-label={ru.previousColor}
+            title={ru.previousColor}
+            disabled={session.previousSlot == null}
+            onClick={() => { session.swapColors(); onChange(); }}
+          />
+          <button
+            type="button"
+            className="color-now"
+            style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614' }}
+            aria-label={ru.currentColor}
+            title={ru.currentColor}
+            onClick={() => { session.swapColors(); onChange(); }}
+          />
+        </div>
+        <div className="palette" aria-label={ru.palette}>
+          <label className="wheel" title={ru.pickColor}>
+            <input
+              type="color"
+              aria-label={ru.pickColor}
+              value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614'}
+              onChange={(event) => {
+                const hex = event.target.value;
+                setDraftHex(hex);
+                window.clearTimeout(colorTimer.current);
+                colorTimer.current = window.setTimeout(() => {
+                  session.useColor(hex);
+                  setDraftHex(null);
+                  onChange();
+                }, 250);
+              }}
+            />
+          </label>
+          {session.colorOrder.map((slot) => {
+            const color = session.doc.palette[slot - 1];
+            if (!color) return null;
+            return (
+              <button
+                key={color.id}
+                type="button"
+                className="swatch"
+                style={{ background: color.hex }}
+                aria-label={color.hex}
+                title={color.hex}
+                aria-pressed={session.colorSlot === slot}
+                onClick={() => { session.setColorSlot(slot); onChange(); }}
+              />
+            );
+          })}
+        </div>
       </div>
       {readout ? <p className="axis-readout">{readout}</p> : null}
       {live ? <p className="selection-readout">{selectionSizeLabel(live)}</p> : null}

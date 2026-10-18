@@ -49,11 +49,9 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [panelOpen, setPanelOpen] = useState(() => window.matchMedia('(min-width: 1201px)').matches);
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const [axisLocked, setAxisLocked] = useState(false);
-  const [draftHex, setDraftHex] = useState<string | null>(null);
   const [sizeFor, setSizeFor] = useState<{ tool: 'pencil' | 'eraser' | 'line'; top: number } | null>(null);
   const [fillPop, setFillPop] = useState<number | null>(null);
   const [tracePop, setTracePop] = useState<number | null>(null);
-  const colorTimer = useRef(0);
   const traceTimer = useRef(0);
   const refresh = () => setFrame((value) => value + 1);
 
@@ -459,43 +457,6 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
             <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} disabled={!session.selection} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
             <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} disabled={!session.clipboard} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
             <button type="button" className="icon-btn" aria-label={ru.clearSelection} title={ru.clearSelection} disabled={!session.selection} onClick={() => { session.clearSelection(); refresh(); }}><Icon name="trash" /></button>
-          </div>
-        </section>
-        <section className="group" aria-label={ru.palette}>
-          <div className="palette" aria-label={ru.palette}>
-            <label className="wheel" title={ru.pickColor}>
-              <input
-                type="color"
-                aria-label={ru.pickColor}
-                value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614'}
-                onChange={(event) => {
-                  const hex = event.target.value;
-                  setDraftHex(hex);
-                  window.clearTimeout(colorTimer.current);
-                  colorTimer.current = window.setTimeout(() => {
-                    session.useColor(hex);
-                    setDraftHex(null);
-                    refresh();
-                  }, 250);
-                }}
-              />
-            </label>
-            {session.colorOrder.map((slot) => {
-              const color = session.doc.palette[slot - 1];
-              if (!color) return null;
-              return (
-                <button
-                  key={color.id}
-                  type="button"
-                  className="swatch"
-                  style={{ background: color.hex }}
-                  aria-label={color.hex}
-                  title={color.hex}
-                  aria-pressed={session.colorSlot === slot}
-                  onClick={() => { session.setColorSlot(slot); refresh(); }}
-                />
-              );
-            })}
           </div>
         </section>
         <section className="group" aria-label={ru.project}>

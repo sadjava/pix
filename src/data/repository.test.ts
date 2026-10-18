@@ -146,6 +146,19 @@ describe('local projects', () => {
     repo.close();
   });
 
+  it('hides a deleted rug and brings it back', async () => {
+    const repo = ProjectRepository.open('trash');
+    const created = await repo.create({ name: 'Корзина', width: 2, height: 2 });
+    await repo.markDeleted(created.record.id, '2026-10-18T07:00:00.000Z');
+    expect(await repo.list()).toHaveLength(0);
+    expect(await repo.listDeleted()).toHaveLength(1);
+    const kept = await repo.load(created.record.id);
+    expect('doc' in kept).toBe(true);
+    await repo.markDeleted(created.record.id, null);
+    expect((await repo.list()).map((item) => item.name)).toEqual(['Корзина']);
+    repo.close();
+  });
+
   it('duplicates and renames without touching another project', async () => {
     const repo = ProjectRepository.open('dup');
     const created = await repo.create({ name: 'Оригинал', width: 3, height: 3 });
@@ -215,5 +228,36 @@ describe('history survives reopen', () => {
     expect(editor.doc.cells[0]).toBe(1);
     expect(editor.history.notice).toContain('Рисунок сохранён');
     expect(emptyHistory().undo).toEqual([]);
+  });
+});
+
+describe('tracing pictures', () => {
+  it('keeps a picture with the rug and drops it when the rug is removed', async () => {
+    const repo = ProjectRepository.open('traces');
+    const created = await repo.create({ name: 'Т', width: 4, height: 4 });
+    await repo.putTrace({
+      id: 't1',
+      projectId: created.record.id,
+      blob: new Blob(['img']),
+      x: 1,
+      y: 2,
+      width: 10,
+      height: 8,
+      rotation: 0.2,
+      opacity: 0.5,
+      cropX: 0.1,
+      cropY: 0,
+      cropW: 0.4,
+      cropH: 1,
+    });
+    repo.close();
+    const again = ProjectRepository.open('traces');
+    const rows = await again.listTraces(created.record.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.opacity).toBe(0.5);
+    expect(rows[0]?.cropW).toBe(0.4);
+    await again.remove(created.record.id);
+    expect(await again.listTraces(created.record.id)).toEqual([]);
+    again.close();
   });
 });

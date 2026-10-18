@@ -17,6 +17,7 @@ import {
   type SelectionRect,
 } from './selection/selection.ts';
 import { colorUsed, pickRecentColor, removeColor, slotOf } from './palette/palette.ts';
+import type { TraceSprite } from './trace/trace.ts';
 
 export interface GesturePreview {
   points: Point[];
@@ -69,6 +70,7 @@ export class EditorSession {
   history: HistoryStacks;
   tool: ToolId = 'pencil';
   colorSlot = 1;
+  previousSlot: number | null = null;
   /** Square stamp edge, in cells. ponytail: capped at 8; a circle stamp would replace the square. */
   brushSize = 1;
   eraserSize = 1;
@@ -77,6 +79,9 @@ export class EditorSession {
   fillErase = false;
   /** Slot numbers, newest last. Not stored in the document. */
   colorOrder: number[];
+  /** Pictures laid under the cells so a motif can be traced. Not part of the rug. */
+  traces: TraceSprite[] = [];
+  activeTraceId: string | null = null;
   selection: SelectionRect | null = null;
   clipboard: ClipboardPayload | null = null;
   pasteOrigin: Point | null = null;
@@ -104,23 +109,31 @@ export class EditorSession {
   }
 
   setColorSlot(slot: number): void {
+    if (slot !== this.colorSlot) this.previousSlot = this.colorSlot;
     this.colorSlot = slot;
+  }
+
+  swapColors(): void {
+    if (this.previousSlot == null) return;
+    const next = this.previousSlot;
+    this.previousSlot = this.colorSlot;
+    this.colorSlot = next;
   }
 
   useColor(hex: string): void {
     const picked = pickRecentColor(this.doc.palette, this.colorOrder, hex);
     if (!picked) return;
     this.colorOrder = picked.order;
-    this.colorSlot = picked.slot;
+    this.setColorSlot(picked.slot);
     if (picked.palette !== this.doc.palette) this.setView({ palette: picked.palette });
   }
 
   pointerDown(cell: Point | null): void {
     if (!cell) return;
-    if (this.tool === 'pan') return;
+    if (this.tool === 'pan' || this.tool === 'trace') return;
     if (this.tool === 'picker') {
       const slot = getCell(this.doc, cell.x, cell.y);
-      if (slot !== 0) this.colorSlot = slot;
+      if (slot !== 0) this.setColorSlot(slot);
       return;
     }
     if (this.tool !== 'select') this.selection = null;

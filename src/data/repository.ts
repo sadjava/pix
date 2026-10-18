@@ -1,11 +1,11 @@
-import type { CellPatch, HistoryEntry, JournalEntry, ProjectDocument, ProjectRecord } from '../model/types.ts';
+import type { CellPatch, HistoryEntry, ProjectDocument, ProjectRecord } from '../model/types.ts';
 import { SCHEMA_VERSION } from '../model/types.ts';
 import { createDocument } from '../editor/canvas/grid.ts';
 import { clipHistory, emptyHistory, parseHistory, type HistoryStacks } from '../editor/history/patches.ts';
 import { cellsToBytes } from '../export/json.ts';
 import { arrayBuffer } from '../export/checksum.ts';
 import { migrateDocument, recoverCells } from './recover.ts';
-import { createDb, type JournalRow, type RugDB, type SnapshotRow } from './db.ts';
+import { createDb, type JournalRow, type RugDB, type SnapshotRow, type TraceRow } from './db.ts';
 
 export interface LoadedProject {
   record: ProjectRecord;
@@ -46,7 +46,18 @@ export class ProjectRepository {
 
   async list(): Promise<ProjectRecord[]> {
     const rows = await this.db.projects.toArray();
-    return rows.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+    return rows.filter((row) => !row.deletedAt).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  }
+
+  async listDeleted(): Promise<ProjectRecord[]> {
+    const rows = await this.db.projects.toArray();
+    return rows.filter((row) => row.deletedAt).sort((a, b) => ((a.deletedAt ?? '') < (b.deletedAt ?? '') ? 1 : -1));
+  }
+
+  async markDeleted(id: string, at: string | null): Promise<void> {
+    const record = await this.db.projects.get(id);
+    if (!record) return;
+    await this.db.projects.put({ ...record, deletedAt: at });
   }
 
   async create(input: { id?: string; name: string; width: number; height: number; now?: string }): Promise<LoadedProject> {
@@ -67,9 +78,10 @@ export class ProjectRepository {
       syncState: 'local-only',
       localChecksum: null,
       cloudRevisionId: null,
+      deletedAt: null,
     };
     const history = emptyHistory();
-    await this.write(record, doc, history, [], 'create');
+    await this.write(record, doc, history);
     return { record, doc, history };
   }
 
@@ -96,19 +108,36 @@ export class ProjectRepository {
       syncState: 'local-only',
       localChecksum: null,
       cloudRevisionId: null,
+      deletedAt: null,
     };
     const history = emptyHistory();
-    await this.write(record, loaded.doc, history, [], 'duplicate');
+    const traces = await this.listTraces(id);
+    await this.write(record, loaded.doc, history);
+    // ponytail: the picture bytes stay in this browser. A cloud blob would replace that for a second device.
+    await this.db.traces.bulkPut(traces.map((row) => ({ ...row, id: crypto.randomUUID(), projectId: record.id })));
     return { record, doc: loaded.doc, history };
   }
 
+  async listTraces(projectId: string): Promise<TraceRow[]> {
+    return this.db.traces.where('projectId').equals(projectId).toArray();
+  }
+
+  async putTrace(row: TraceRow): Promise<void> {
+    await this.db.traces.put(row);
+  }
+
+  async deleteTrace(id: string): Promise<void> {
+    await this.db.traces.delete(id);
+  }
+
   async remove(id: string): Promise<void> {
-    await this.db.transaction('rw', this.db.projects, this.db.snapshots, this.db.journal, this.db.histories, this.db.outbox, async () => {
+    await this.db.transaction('rw', [this.db.projects, this.db.snapshots, this.db.journal, this.db.histories, this.db.outbox, this.db.traces], async () => {
       await this.db.projects.delete(id);
       await this.db.snapshots.delete(id);
       await this.db.journal.where('projectId').equals(id).delete();
       await this.db.histories.delete(id);
       await this.db.outbox.where('projectId').equals(id).delete();
+      await this.db.traces.where('projectId').equals(id).delete();
     });
   }
 
@@ -151,7 +180,7 @@ export class ProjectRepository {
       updatedAt: now,
       lastLocalSavedAt: now,
     };
-    await this.write(record, input.doc, input.history, journalFrom(input), input.type);
+    await this.write(record, input.doc, input.history);
     return record;
   }
 
@@ -181,16 +210,10 @@ export class ProjectRepository {
     record: ProjectRecord,
     doc: ProjectDocument,
     history: HistoryStacks,
-    journal: JournalEntry[],
-    type: string,
   ): Promise<void> {
     const snapshot = toSnapshot(record.id, record.documentRevision, doc);
     await this.db.transaction('rw', this.db.projects, this.db.snapshots, this.db.journal, this.db.histories, async () => {
       await this.db.snapshots.put(snapshot);
-      for (const entry of journal) {
-        if (type === 'cancel' || type === 'undo' || type === 'redo') continue;
-        await this.db.journal.add({ ...entry, projectId: record.id });
-      }
       await this.db.histories.put({
         projectId: record.id,
         undo: history.undo,
@@ -206,12 +229,6 @@ export class ProjectRepository {
         .delete();
     });
   }
-}
-
-function journalFrom(input: CommitInput): JournalEntry[] {
-  if (input.patches.length === 0) return [];
-  if (input.type === 'cancel' || input.type === 'undo' || input.type === 'redo') return [];
-  return [{ opNumber: input.opNumber, type: input.type, patches: input.patches, at: new Date().toISOString() }];
 }
 
 function toSnapshot(projectId: string, revision: number, doc: ProjectDocument): SnapshotRow {

@@ -8,6 +8,7 @@ import { Icon } from '../icons.tsx';
 import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
 import type { SelectionHandle, SelectionRect } from '../selection/selection.ts';
+import { gripAt, placeTrace, type SourceCrop, type TraceFrame, type TraceGrip, type TraceSprite } from '../trace/trace.ts';
 
 type AxisName = 'vertical' | 'horizontal';
 
@@ -17,12 +18,14 @@ export function CanvasView({
   axisSnap,
   axisLocked,
   onChange,
+  onTrace,
 }: {
   session: EditorSession;
   frame: number;
   axisSnap: 'center' | 'edge';
   axisLocked: boolean;
   onChange: () => void;
+  onTrace: (sprite: TraceSprite) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const pixelRef = useRef<HTMLCanvasElement>(null);
@@ -35,6 +38,7 @@ export function CanvasView({
   const resizeDrag = useRef<SelectionHandle | null>(null);
   const panning = useRef(false);
   const axisDrag = useRef<AxisName | null>(null);
+  const traceDrag = useRef<{ id: string; grip: TraceGrip; frame: TraceFrame; crop: SourceCrop; x: number; y: number } | null>(null);
   const lastPan = useRef({ x: 0, y: 0 });
   const sizeRef = useRef({ width: 0, height: 0 });
   const saveTimer = useRef(0);
@@ -115,6 +119,14 @@ export function CanvasView({
     };
   }, []);
 
+  function commitTrace(): void {
+    const tracing = traceDrag.current;
+    traceDrag.current = null;
+    if (!tracing) return;
+    const sprite = session.traces.find((item) => item.id === tracing.id);
+    if (sprite) onTrace(sprite);
+  }
+
   function cellAt(event: { clientX: number; clientY: number }) {
     const canvas = pixelRef.current;
     if (!canvas) return null;
@@ -155,7 +167,9 @@ export function CanvasView({
       ? ' is-axis-y'
       : session.tool === 'pan'
         ? ' is-pan'
-        : '';
+        : session.tool === 'trace'
+          ? ' is-trace'
+          : '';
   const rectSize = session.liveRectSize();
   const live = rectSize ?? session.liveSelection();
 
@@ -182,6 +196,7 @@ export function CanvasView({
           setAxisCursor(null);
           setReadout(null);
           session.cancelGesture();
+          commitTrace();
           const gesture = fingerPair(pointers.current, pixelRef.current);
           if (gesture) pinch.current = { ...gesture, viewport: { ...session.doc.viewport } };
           onChange();
@@ -203,6 +218,20 @@ export function CanvasView({
             resizeDrag.current = handle;
             return;
           }
+        }
+        if (session.tool === 'trace') {
+          const point = cellSpace(event, pixelRef.current, session);
+          const hitTrace = point ? traceAt(session, point.x, point.y) : null;
+          if (point && hitTrace) {
+            const sprite = focusTrace(session, hitTrace.id);
+            if (sprite) {
+              traceDrag.current = { id: sprite.id, grip: hitTrace.grip, frame: { ...sprite.frame }, crop: { ...sprite.crop }, x: point.x, y: point.y };
+            }
+          } else {
+            session.activeTraceId = null;
+          }
+          onChange();
+          return;
         }
         const hit = axisLocked ? null : axisHit(session, event.clientX, event.clientY, pixelRef.current);
         if (hit) {
@@ -242,6 +271,18 @@ export function CanvasView({
           const viewport = panBy(session.doc.viewport, event.clientX - lastPan.current.x, event.clientY - lastPan.current.y);
           lastPan.current = { x: event.clientX, y: event.clientY };
           remember(session, viewport, onChange, saveTimer);
+          return;
+        }
+        const tracing = traceDrag.current;
+        if (tracing) {
+          const point = cellSpace(event, pixelRef.current, session);
+          const sprite = session.traces.find((item) => item.id === tracing.id);
+          if (point && sprite) {
+            const placed = placeTrace(tracing.frame, tracing.crop, tracing.grip, point.x, point.y, tracing.x, tracing.y);
+            sprite.frame = placed.frame;
+            sprite.crop = placed.crop;
+          }
+          onChange();
           return;
         }
         if (resizeDrag.current) {
@@ -293,6 +334,11 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (traceDrag.current) {
+          commitTrace();
+          onChange();
+          return;
+        }
         if (pasteDrag.current) {
           pasteDrag.current = null;
           session.confirmPaste();
@@ -318,6 +364,7 @@ export function CanvasView({
         pasteDrag.current = null;
         resizeDrag.current = null;
         panning.current = false;
+        commitTrace();
         axisDrag.current = null;
         setAxisCursor(null);
         setReadout(null);
@@ -327,6 +374,25 @@ export function CanvasView({
     >
       <canvas ref={pixelRef} />
       <canvas ref={overlayRef} className="overlay" />
+      <div className="color-pair" onPointerDown={(event) => event.stopPropagation()}>
+        <button
+          type="button"
+          className="color-prev"
+          style={session.previousSlot ? { background: session.doc.palette[session.previousSlot - 1]?.hex ?? '#1a1614' } : undefined}
+          aria-label={ru.previousColor}
+          title={ru.previousColor}
+          disabled={session.previousSlot == null}
+          onClick={() => { session.swapColors(); onChange(); }}
+        />
+        <button
+          type="button"
+          className="color-now"
+          style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614' }}
+          aria-label={ru.currentColor}
+          title={ru.currentColor}
+          onClick={() => { session.swapColors(); onChange(); }}
+        />
+      </div>
       {readout ? <p className="axis-readout">{readout}</p> : null}
       {live ? <p className="selection-readout">{selectionSizeLabel(live)}</p> : null}
       <div className="canvas-chrome" onPointerDown={(event) => event.stopPropagation()}>
@@ -393,9 +459,10 @@ function draw(
   const pixelCtx = pixels.getContext('2d');
   const overlayCtx = overlay.getContext('2d');
   if (!pixelCtx || !overlayCtx) return;
+  const pictures = session.traces.filter((trace) => trace.image);
   const image = renderRgba(session.doc, {
     grid: false,
-    checker: session.doc.checkerVisible,
+    checker: pictures.length === 0 && session.doc.checkerVisible,
     pixelsPerCell: 1,
     border: false,
     checkerBlock: session.doc.checkerBlock,
@@ -407,11 +474,15 @@ function draw(
   if (!sampleCtx) return;
   sampleCtx.putImageData(new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), 0, 0);
   pixelCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  pixelCtx.imageSmoothingEnabled = false;
   pixelCtx.clearRect(0, 0, rect.width, rect.height);
   const { viewport } = session.doc;
   const drawW = session.doc.width * viewport.cellSize * viewport.scale;
   const drawH = session.doc.height * viewport.cellSize * viewport.scale;
+  if (pictures.length > 0 && session.doc.checkerVisible) fillChecker(pixelCtx, viewport, drawW, drawH, session.doc.checkerBlock);
+  pixelCtx.imageSmoothingEnabled = true;
+  pixelCtx.imageSmoothingQuality = 'high';
+  for (const trace of pictures) drawTrace(pixelCtx, trace, viewport);
+  pixelCtx.imageSmoothingEnabled = false;
   pixelCtx.drawImage(sample, viewport.panX, viewport.panY, drawW, drawH);
 
   overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -440,6 +511,10 @@ function draw(
     }
   }
   drawAxes(overlayCtx, session, viewport, dragging);
+  if (session.tool === 'trace') {
+    const active = session.traces.find((trace) => trace.id === session.activeTraceId);
+    if (active) drawTraceGrips(overlayCtx, active, viewport);
+  }
 }
 
 function drawGrid(
@@ -667,4 +742,117 @@ function dragAxis(
 
 function clampAxis(axis2: number, edge: number): number {
   return Math.max(0, Math.min(edge * 2, axis2));
+}
+
+function cellSpace(
+  event: { clientX: number; clientY: number },
+  canvas: HTMLCanvasElement | null,
+  session: EditorSession,
+): { x: number; y: number } | null {
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  const { panX, panY, scale, cellSize } = session.doc.viewport;
+  const cellPx = cellSize * scale;
+  if (cellPx <= 0) return null;
+  return { x: (event.clientX - rect.left - panX) / cellPx, y: (event.clientY - rect.top - panY) / cellPx };
+}
+
+function traceAt(session: EditorSession, cellX: number, cellY: number): { id: string; grip: TraceGrip } | null {
+  const cellPx = session.doc.viewport.cellSize * session.doc.viewport.scale;
+  const slop = 22 / Math.max(cellPx, 0.5);
+  for (let index = session.traces.length - 1; index >= 0; index -= 1) {
+    const trace = session.traces[index];
+    if (!trace) continue;
+    const grip = gripAt(trace.frame, cellX, cellY, slop);
+    if (grip) return { id: trace.id, grip };
+  }
+  return null;
+}
+
+function focusTrace(session: EditorSession, id: string): TraceSprite | null {
+  const index = session.traces.findIndex((trace) => trace.id === id);
+  if (index < 0) return null;
+  const [sprite] = session.traces.splice(index, 1);
+  if (!sprite) return null;
+  session.traces.push(sprite);
+  session.activeTraceId = id;
+  return sprite;
+}
+
+function drawTrace(ctx: CanvasRenderingContext2D, trace: TraceSprite, viewport: Viewport): void {
+  if (!trace.image) return;
+  const cellPx = viewport.cellSize * viewport.scale;
+  const cx = viewport.panX + (trace.frame.x + trace.frame.width / 2) * cellPx;
+  const cy = viewport.panY + (trace.frame.y + trace.frame.height / 2) * cellPx;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(trace.frame.rotation);
+  ctx.globalAlpha = trace.opacity;
+  ctx.drawImage(
+    trace.image,
+    trace.crop.x * trace.naturalWidth,
+    trace.crop.y * trace.naturalHeight,
+    Math.max(1, trace.crop.width * trace.naturalWidth),
+    Math.max(1, trace.crop.height * trace.naturalHeight),
+    (-trace.frame.width * cellPx) / 2,
+    (-trace.frame.height * cellPx) / 2,
+    trace.frame.width * cellPx,
+    trace.frame.height * cellPx,
+  );
+  ctx.restore();
+}
+
+function drawTraceGrips(ctx: CanvasRenderingContext2D, trace: TraceSprite, viewport: Viewport): void {
+  const cellPx = viewport.cellSize * viewport.scale;
+  const cx = viewport.panX + (trace.frame.x + trace.frame.width / 2) * cellPx;
+  const cy = viewport.panY + (trace.frame.y + trace.frame.height / 2) * cellPx;
+  const dw = trace.frame.width * cellPx;
+  const dh = trace.frame.height * cellPx;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(trace.frame.rotation);
+  ctx.strokeStyle = '#243e66';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-dw / 2, -dh / 2, dw, dh);
+  ctx.beginPath();
+  ctx.moveTo(0, -dh / 2);
+  ctx.lineTo(0, -dh / 2 - 40);
+  ctx.stroke();
+  drawHandle(ctx, 0, -dh / 2 - 40);
+  ctx.fillStyle = '#f7f3eb';
+  const marks: [number, number][] = [
+    [-dw / 2, -dh / 2], [dw / 2, -dh / 2], [-dw / 2, dh / 2], [dw / 2, dh / 2],
+    [0, -dh / 2], [0, dh / 2], [-dw / 2, 0], [dw / 2, 0],
+  ];
+  for (const [x, y] of marks) {
+    ctx.fillRect(x - 5, y - 5, 10, 10);
+    ctx.strokeRect(x - 5, y - 5, 10, 10);
+  }
+  ctx.restore();
+}
+
+function fillChecker(ctx: CanvasRenderingContext2D, viewport: Viewport, drawW: number, drawH: number, block: number): void {
+  const blockPx = Math.max(1, block) * viewport.cellSize * viewport.scale;
+  const tile = Math.max(2, Math.round(blockPx * 2));
+  const sample = document.createElement('canvas');
+  sample.width = tile;
+  sample.height = tile;
+  const sampleCtx = sample.getContext('2d');
+  if (!sampleCtx) return;
+  const half = tile / 2;
+  sampleCtx.fillStyle = '#e8e2d8';
+  sampleCtx.fillRect(0, 0, tile, tile);
+  sampleCtx.fillStyle = '#c4bcb0';
+  sampleCtx.fillRect(0, 0, half, half);
+  sampleCtx.fillRect(half, half, half, half);
+  const pattern = ctx.createPattern(sample, 'repeat');
+  if (!pattern) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(viewport.panX, viewport.panY, drawW, drawH);
+  ctx.clip();
+  ctx.translate(viewport.panX, viewport.panY);
+  ctx.fillStyle = pattern;
+  ctx.fillRect(0, 0, drawW, drawH);
+  ctx.restore();
 }

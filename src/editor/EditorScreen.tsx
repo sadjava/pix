@@ -15,6 +15,8 @@ import { enqueueBackup, drainOutbox } from '../backup/outbox.ts';
 import { snapAxis } from './canvas/coords.ts';
 import { axisLabel } from './symmetry/axisLabel.ts';
 import { Icon, type IconName } from './icons.tsx';
+import { fitFrame, type TraceSprite } from './trace/trace.ts';
+import type { TraceRow } from '../data/db.ts';
 
 const tools: { id: ToolId; label: string; icon: IconName }[] = [
   { id: 'pencil', label: ru.pencil, icon: 'pencil' },
@@ -27,6 +29,7 @@ const tools: { id: ToolId; label: string; icon: IconName }[] = [
   { id: 'diamond', label: ru.diamond, icon: 'diamond' },
   { id: 'select', label: ru.select, icon: 'select' },
   { id: 'pan', label: ru.pan, icon: 'pan' },
+  { id: 'trace', label: ru.trace, icon: 'image' },
 ];
 
 export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () => void; onBusy: (busy: boolean) => void }) {
@@ -49,7 +52,10 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [draftHex, setDraftHex] = useState<string | null>(null);
   const [sizeFor, setSizeFor] = useState<{ tool: 'pencil' | 'eraser' | 'line'; top: number } | null>(null);
   const [fillPop, setFillPop] = useState<number | null>(null);
+  const [tracePop, setTracePop] = useState<number | null>(null);
   const colorTimer = useRef(0);
+  const traceTimer = useRef(0);
+  const traceFileRef = useRef<HTMLInputElement>(null);
   const refresh = () => setFrame((value) => value + 1);
 
   useEffect(() => {
@@ -74,6 +80,24 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
         });
       };
       sessionRef.current = editor;
+      void repository.listTraces(id).then(async (rows) => {
+        const sprites: TraceSprite[] = [];
+        for (const row of rows) {
+          if (cancel) break;
+          try {
+            const image = await createImageBitmap(row.blob);
+            sprites.push(spriteFromRow(row, image));
+          } catch {
+            // A picture this browser cannot decode stays out of the way.
+          }
+        }
+        if (cancel) {
+          for (const sprite of sprites) closeImage(sprite.image);
+          return;
+        }
+        editor.traces = sprites;
+        refresh();
+      });
       const xEven = loaded.doc.symmetry.axisX2 % 2 === 0;
       const yEven = loaded.doc.symmetry.axisY2 % 2 === 0;
       if (xEven === yEven) setAxisSnap(xEven ? 'edge' : 'center');
@@ -104,6 +128,19 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   useEffect(() => {
     onBusy(Boolean(sessionRef.current?.gesture));
   }, [frame, onBusy]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      const editor = sessionRef.current;
+      if (!editor || editor.tool !== 'trace' || !editor.activeTraceId) return;
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      event.preventDefault();
+      void forgetTrace(editor, editor.activeTraceId, refresh);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     const editor = sessionRef.current;
@@ -146,6 +183,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   };
   const rectSize = session.liveRectSize();
   const live = session.liveSelection();
+  const activeTrace = session.traces.find((trace) => trace.id === session.activeTraceId) ?? null;
 
   return (
     <div className={`editor${panelOpen ? ' panel-open' : ''}`}>
@@ -196,6 +234,21 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
                 const box = event.currentTarget.getBoundingClientRect();
                 setFillPop((current) => current === null ? box.top + box.height / 2 : null);
                 setSizeFor(null);
+                setTracePop(null);
+                return;
+              }
+              if (tool.id === 'trace') {
+                const box = event.currentTarget.getBoundingClientRect();
+                const top = box.top + box.height / 2;
+                if (session.tool === 'trace') {
+                  setTracePop((current) => current === null ? top : null);
+                  return;
+                }
+                session.setTool('trace');
+                setSizeFor(null);
+                setFillPop(null);
+                setTracePop(session.traces.length === 0 ? top : null);
+                refresh();
                 return;
               }
               const sized = tool.id === 'pencil' || tool.id === 'eraser' || tool.id === 'line' ? tool.id : null;
@@ -203,11 +256,13 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
                 const box = event.currentTarget.getBoundingClientRect();
                 const top = box.top + box.height / 2;
                 setSizeFor((current) => current?.tool === sized ? null : { tool: sized, top });
+                setTracePop(null);
                 return;
               }
               session.setTool(tool.id);
               setSizeFor(null);
               setFillPop(null);
+              setTracePop(null);
               refresh();
             }}
           >
@@ -247,8 +302,45 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           <Icon name="trash" />
         </button>
       ) : null}
+      {tracePop !== null ? (
+        <div className="size-pop trace-pop" style={{ top: tracePop }}>
+          <button type="button" onClick={() => traceFileRef.current?.click()}>{ru.traceAdd}</button>
+          {activeTrace ? (
+            <>
+              <input
+                type="range"
+                min={5}
+                max={100}
+                aria-label={ru.traceOpacity}
+                value={Math.round(activeTrace.opacity * 100)}
+                onChange={(event) => {
+                  activeTrace.opacity = Number(event.target.value) / 100;
+                  refresh();
+                  window.clearTimeout(traceTimer.current);
+                  traceTimer.current = window.setTimeout(() => void repository.putTrace(traceRow(id, activeTrace)), 200);
+                }}
+              />
+              <button type="button" className="icon-btn" aria-label={ru.traceDelete} title={ru.traceDelete} onClick={() => void forgetTrace(session, activeTrace.id, refresh)}>
+                <Icon name="trash" />
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      <input
+        ref={traceFileRef}
+        className="trace-file"
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={(event) => {
+          const files = event.target.files;
+          event.target.value = '';
+          if (files && files.length > 0) void addTraces(session, id, files, refresh, setError);
+        }}
+      />
       <div className="stage">
-        <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} />
+        <CanvasView session={session} frame={frame} axisSnap={axisSnap} axisLocked={axisLocked} onChange={refresh} onTrace={(sprite) => void repository.putTrace(traceRow(id, sprite))} />
       </div>
       <aside className="side" inert={!panelOpen}>
         {error ? <p className="warning">{error}</p> : null}
@@ -531,6 +623,112 @@ function download(bytes: Uint8Array, name: string, type: string): void {
   link.download = name;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+const TRACE_EDGE = 1600;
+
+function spriteFromRow(row: TraceRow, image: ImageBitmap): TraceSprite {
+  return {
+    id: row.id,
+    image,
+    blob: row.blob,
+    naturalWidth: image.width,
+    naturalHeight: image.height,
+    frame: { x: row.x, y: row.y, width: row.width, height: row.height, rotation: row.rotation },
+    crop: { x: row.cropX, y: row.cropY, width: row.cropW, height: row.cropH },
+    opacity: row.opacity,
+  };
+}
+
+function traceRow(projectId: string, sprite: TraceSprite): TraceRow {
+  return {
+    id: sprite.id,
+    projectId,
+    blob: sprite.blob,
+    x: sprite.frame.x,
+    y: sprite.frame.y,
+    width: sprite.frame.width,
+    height: sprite.frame.height,
+    rotation: sprite.frame.rotation,
+    opacity: sprite.opacity,
+    cropX: sprite.crop.x,
+    cropY: sprite.crop.y,
+    cropW: sprite.crop.width,
+    cropH: sprite.crop.height,
+  };
+}
+
+async function forgetTrace(session: EditorSession, traceId: string, done: () => void): Promise<void> {
+  const index = session.traces.findIndex((trace) => trace.id === traceId);
+  if (index < 0) return;
+  const [sprite] = session.traces.splice(index, 1);
+  if (session.activeTraceId === traceId) session.activeTraceId = null;
+  closeImage(sprite?.image ?? null);
+  await repository.deleteTrace(traceId);
+  done();
+}
+
+async function addTraces(
+  session: EditorSession,
+  projectId: string,
+  files: FileList,
+  done: () => void,
+  fail: (text: string) => void,
+): Promise<void> {
+  let added = 0;
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue;
+    try {
+      const prepared = await traceBitmap(file);
+      const frame = fitFrame(session.doc.width, session.doc.height, prepared.image.width, prepared.image.height);
+      frame.x += added * 6;
+      frame.y += added * 6;
+      const sprite: TraceSprite = {
+        id: crypto.randomUUID(),
+        image: prepared.image,
+        blob: prepared.blob,
+        naturalWidth: prepared.image.width,
+        naturalHeight: prepared.image.height,
+        frame,
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+        opacity: 0.8,
+      };
+      session.traces.push(sprite);
+      session.activeTraceId = sprite.id;
+      await repository.putTrace(traceRow(projectId, sprite));
+      added += 1;
+    } catch {
+      fail(ru.traceFailed);
+    }
+  }
+  if (added > 0) session.setTool('trace');
+  done();
+}
+
+async function traceBitmap(file: Blob): Promise<{ blob: Blob; image: ImageBitmap }> {
+  const source = await createImageBitmap(file);
+  const edge = Math.max(source.width, source.height);
+  // ponytail: long edge capped at 1600px. Keeping the original file would replace the cap.
+  if (edge <= TRACE_EDGE) return { blob: file, image: source };
+  const scale = TRACE_EDGE / edge;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(source.width * scale));
+  canvas.height = Math.max(1, Math.round(source.height * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    source.close();
+    throw new Error('canvas');
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  source.close();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  if (!blob) throw new Error('blob');
+  return { blob, image: await createImageBitmap(blob) };
+}
+
+function closeImage(image: CanvasImageSource | null): void {
+  if (image && 'close' in image && typeof image.close === 'function') image.close();
 }
 
 function deviceMemory(): number | undefined {

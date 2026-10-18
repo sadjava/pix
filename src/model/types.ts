@@ -53,6 +53,7 @@ export interface ProjectRecord {
   syncState: SyncState;
   localChecksum: string | null;
   cloudRevisionId: string | null;
+  deletedAt?: string | null;
 }
 
 export interface ProjectDocument {
@@ -74,10 +75,18 @@ export interface CellPatch {
   after: number;
 }
 
+export interface PackedPatches {
+  index: Uint32Array;
+  before: Uint16Array;
+  after: Uint16Array;
+}
+
 export interface HistoryEntry {
   opNumber: number;
   type: string;
   patches: CellPatch[];
+  /** Large edits, such as a fill, stay undoable without one object per cell. */
+  packed?: PackedPatches;
 }
 
 export interface JournalEntry {
@@ -112,7 +121,8 @@ export type ToolId =
   | 'rect'
   | 'diamond'
   | 'select'
-  | 'pan';
+  | 'pan'
+  | 'trace';
 
 export interface ClipboardPayload {
   schemaVersion: number;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { RugRow } from '../backup/protocol.ts';
 import { documentFromRow } from '../backup/restore.ts';
-import { rememberDeleted, syncAccount } from '../backup/outbox.ts';
+import { forgetDeleted, rememberDeleted, syncAccount } from '../backup/outbox.ts';
 import { repository } from '../data/instance.ts';
 import { requestPersistentStorage, storageIsPersisted } from '../data/storage.ts';
 import { sizeDecision } from '../editor/canvas/grid.ts';
@@ -24,10 +24,14 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
   const [account, setAccount] = useState<{ id: string; email: string } | null | undefined>(undefined);
   const [authOpen, setAuthOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [trash, setTrash] = useState<ProjectRecord[]>([]);
+  const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const configured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
 
   async function reload(): Promise<void> {
     setProjects(await repository.list());
+    setTrash(await repository.listDeleted());
+    setArmedDelete(null);
   }
 
   useEffect(() => {
@@ -114,11 +118,32 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
             <div className="row">
               <button type="button" onClick={() => void rename(project, reload)}>{ru.rename}</button>
               <button type="button" onClick={() => void repository.duplicate(project.id).then(() => reload())}>{ru.duplicate}</button>
-              <button type="button" onClick={() => void remove(project, reload)}>{ru.remove}</button>
+              {armedDelete === project.id ? (
+                <>
+                  <button type="button" onClick={() => void remove(project, reload)}>{ru.deleteConfirm}</button>
+                  <button type="button" onClick={() => setArmedDelete(null)}>{ru.cancel}</button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setArmedDelete(project.id)}>{ru.remove}</button>
+              )}
             </div>
           </li>
         ))}
       </ul>
+      {trash.length > 0 ? (
+        <section className="trash">
+          <h2>{ru.deletedRugs}</h2>
+          <ul>
+            {trash.map((project) => (
+              <li key={project.id}>
+                <span>{project.name}</span>
+                <span>{project.width} × {project.height}</span>
+                <button type="button" onClick={() => void restoreRug(project, reload)}>{ru.restoreRug}</button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section className="diagnostics">
         <h2>{ru.diagnostics}</h2>
         <button type="button" onClick={() => void showStorage(setStorageText)}>{ru.persistAsk}</button>
@@ -205,8 +230,15 @@ async function rename(project: ProjectRecord, reload: () => Promise<void>): Prom
 
 async function remove(project: ProjectRecord, reload: () => Promise<void>): Promise<void> {
   if (!window.confirm(ru.deleteRug)) return;
-  await repository.remove(project.id);
+  await repository.markDeleted(project.id, new Date().toISOString());
   await rememberDeleted(repository, project.id);
+  await reload();
+  await syncIfEnabled(reload);
+}
+
+async function restoreRug(project: ProjectRecord, reload: () => Promise<void>): Promise<void> {
+  await forgetDeleted(repository, project.id);
+  await repository.markDeleted(project.id, null);
   await reload();
   await syncIfEnabled(reload);
 }

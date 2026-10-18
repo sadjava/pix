@@ -123,6 +123,11 @@ export async function rememberDeleted(repo: ProjectRepository, id: string): Prom
   await repo.writeMeta(DELETED, [...ids]);
 }
 
+export async function forgetDeleted(repo: ProjectRepository, id: string): Promise<void> {
+  const ids = (await repo.readMeta<string[]>(DELETED) ?? []).filter((item) => item !== id);
+  await repo.writeMeta(DELETED, ids);
+}
+
 async function flushDeleted(repo: ProjectRepository, transport: SyncTransport): Promise<Set<string>> {
   const ids = await repo.readMeta<string[]>(DELETED) ?? [];
   const left: string[] = [];

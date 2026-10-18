@@ -42,6 +42,23 @@ export interface MetaRow {
   value: unknown;
 }
 
+/** A tracing picture. It is not uploaded with the rug. */
+export interface TraceRow {
+  id: string;
+  projectId: string;
+  blob: Blob;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  opacity: number;
+  cropX: number;
+  cropY: number;
+  cropW: number;
+  cropH: number;
+}
+
 export class RugDB extends Dexie {
   projects!: Table<ProjectRecord, string>;
   snapshots!: Table<SnapshotRow, string>;
@@ -49,6 +66,7 @@ export class RugDB extends Dexie {
   histories!: Table<HistoryRow, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<OutboxRow, string>;
+  traces!: Table<TraceRow, string>;
 
   constructor(name = 'rug-pixel') {
     super(name);
@@ -60,6 +78,7 @@ export class RugDB extends Dexie {
       meta: 'key',
       outbox: 'id, projectId',
     });
+    this.version(2).stores({ traces: 'id, projectId' });
   }
 }
 

@@ -1,4 +1,4 @@
-import { HISTORY_LIMIT, type CellPatch, type HistoryEntry } from '../../model/types.ts';
+import { HISTORY_LIMIT, type CellPatch, type HistoryEntry, type PackedPatches } from '../../model/types.ts';
 
 const BYTE_LIMIT = 400_000;
 
@@ -16,8 +16,25 @@ export function emptyHistory(): HistoryStacks {
   return { undo: [], redo: [], notice: null };
 }
 
+const PACK_FROM = 512;
+
+export function packEntry(entry: HistoryEntry): HistoryEntry {
+  if (entry.packed || entry.patches.length < PACK_FROM) return entry;
+  const index = new Uint32Array(entry.patches.length);
+  const before = new Uint16Array(entry.patches.length);
+  const after = new Uint16Array(entry.patches.length);
+  for (let i = 0; i < entry.patches.length; i += 1) {
+    const patch = entry.patches[i];
+    if (!patch) continue;
+    index[i] = patch.index;
+    before[i] = patch.before;
+    after[i] = patch.after;
+  }
+  return { opNumber: entry.opNumber, type: entry.type, patches: [], packed: { index, before, after } };
+}
+
 export function pushHistory(stacks: HistoryStacks, entry: HistoryEntry): HistoryStacks {
-  const undo = [...stacks.undo, entry];
+  const undo = [...stacks.undo, packEntry(entry)];
   return { undo: trim(undo), redo: [], notice: stacks.notice };
 }
 
@@ -28,7 +45,7 @@ export function undoHistory(
   const entry = stacks.undo[stacks.undo.length - 1];
   if (!entry) return null;
   const next = new Uint16Array(cells);
-  for (const patch of entry.patches) next[patch.index] = patch.before;
+  paintEntry(next, entry, 'before');
   return {
     cells: next,
     stacks: { undo: stacks.undo.slice(0, -1), redo: [...stacks.redo, entry], notice: stacks.notice },
@@ -42,7 +59,7 @@ export function redoHistory(
   const entry = stacks.redo[stacks.redo.length - 1];
   if (!entry) return null;
   const next = new Uint16Array(cells);
-  for (const patch of entry.patches) next[patch.index] = patch.after;
+  paintEntry(next, entry, 'after');
   return {
     cells: next,
     stacks: { undo: [...stacks.undo, entry], redo: stacks.redo.slice(0, -1), notice: stacks.notice },
@@ -56,7 +73,24 @@ function trim(undo: HistoryEntry[]): HistoryEntry[] {
 }
 
 function byteSize(entries: HistoryEntry[]): number {
-  return JSON.stringify(entries).length;
+  let size = 0;
+  for (const entry of entries) {
+    if (entry.packed) size += entry.packed.index.byteLength + entry.packed.before.byteLength + entry.packed.after.byteLength;
+    else size += entry.patches.length * 16;
+  }
+  return size;
+}
+
+function paintEntry(cells: Uint16Array, entry: HistoryEntry, direction: 'before' | 'after'): void {
+  if (entry.packed) {
+    const values = direction === 'before' ? entry.packed.before : entry.packed.after;
+    for (let i = 0; i < entry.packed.index.length; i += 1) {
+      const index = entry.packed.index[i] ?? 0;
+      if (index >= 0 && index < cells.length) cells[index] = values[i] ?? 0;
+    }
+    return;
+  }
+  for (const patch of entry.patches) cells[patch.index] = direction === 'before' ? patch.before : patch.after;
 }
 
 export function parseHistory(raw: unknown): HistoryStacks {
@@ -77,10 +111,14 @@ function parseEntries(raw: unknown): HistoryEntry[] | null {
   const entries: HistoryEntry[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') return null;
-    const entry = item as { opNumber?: unknown; type?: unknown; patches?: unknown };
-    if (typeof entry.opNumber !== 'number' || typeof entry.type !== 'string' || !Array.isArray(entry.patches)) {
-      return null;
+    const entry = item as { opNumber?: unknown; type?: unknown; patches?: unknown; packed?: unknown };
+    if (typeof entry.opNumber !== 'number' || typeof entry.type !== 'string') return null;
+    const packed = readPacked(entry.packed);
+    if (packed) {
+      entries.push({ opNumber: entry.opNumber, type: entry.type, patches: [], packed });
+      continue;
     }
+    if (!Array.isArray(entry.patches)) return null;
     const patches: CellPatch[] = [];
     for (const patch of entry.patches) {
       if (!patch || typeof patch !== 'object') return null;
@@ -93,4 +131,20 @@ function parseEntries(raw: unknown): HistoryEntry[] | null {
     entries.push({ opNumber: entry.opNumber, type: entry.type, patches });
   }
   return entries;
+}
+
+function readPacked(raw: unknown): PackedPatches | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as { index?: unknown; before?: unknown; after?: unknown };
+  const index = asTyped(value.index, Uint32Array);
+  const before = asTyped(value.before, Uint16Array);
+  const after = asTyped(value.after, Uint16Array);
+  if (!index || !before || !after || index.length !== before.length || index.length !== after.length) return null;
+  return { index, before, after };
+}
+
+function asTyped<T extends Uint16Array | Uint32Array>(raw: unknown, kind: { new (values: ArrayLike<number>): T; prototype: T }): T | null {
+  if (raw instanceof kind) return raw;
+  if (!Array.isArray(raw) || raw.some((item) => typeof item !== 'number')) return null;
+  return new kind(raw);
 }

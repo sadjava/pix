@@ -148,6 +148,33 @@ describe('pencil, eraser, fill, picker', () => {
     expect(wipe.fillErase).toBe(false);
   });
 
+  it('undoes a fill that covers thousands of cells', () => {
+    const editor = session(80, 80);
+    editor.setTool('fill');
+    editor.pointerDown({ x: 0, y: 0 });
+    expect(editor.doc.cells[0]).toBe(1);
+    expect(editor.doc.cells[80 * 80 - 1]).toBe(1);
+    expect(editor.history.undo[0]?.packed?.index.length).toBe(80 * 80);
+    editor.undo();
+    expect(editor.doc.cells[0]).toBe(0);
+    expect(editor.doc.cells[80 * 80 - 1]).toBe(0);
+    editor.redo();
+    expect(editor.doc.cells[10]).toBe(1);
+  });
+
+  it('keeps the previous color and swaps back to it', () => {
+    const editor = session();
+    editor.setColorSlot(1);
+    editor.previousSlot = null;
+    editor.doc.palette.push({ id: 'clay', name: 'Глина', hex: '#be6437' });
+    editor.setColorSlot(2);
+    expect(editor.colorSlot).toBe(2);
+    expect(editor.previousSlot).toBe(1);
+    editor.swapColors();
+    expect(editor.colorSlot).toBe(1);
+    expect(editor.previousSlot).toBe(2);
+  });
+
   it('picks the color under the pointer', () => {
     const editor = session();
     editor.doc.cells[3] = 4;

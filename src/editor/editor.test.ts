@@ -4,7 +4,7 @@ import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
 import { pickRecentColor } from './palette/palette.ts';
-import { EditorSession, stylusErasing } from './session.ts';
+import { EditorSession, penButtonHover, stylusErasing } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
 import { circleCells, diamondCells, rectOutline } from './tools/shapes.ts';
@@ -139,6 +139,15 @@ describe('pencil, eraser, fill, picker', () => {
     expect(stylusErasing('mouse', 2, 2)).toBe(true);
     expect(stylusErasing('mouse', 1, 4)).toBe(false);
     expect(stylusErasing('touch', 5, 32)).toBe(false);
+    expect(stylusErasing('eraser', 0, 1)).toBe(true);
+    expect(penButtonHover('pen', 0, 1, 0)).toBe(true);
+    expect(penButtonHover('pen', -1, 1, 0)).toBe(true);
+    expect(penButtonHover('pen', 1, 4, 0)).toBe(true);
+    expect(penButtonHover('pen', 1, 0, 0)).toBe(false);
+    expect(penButtonHover('pen', 0, 0, 0)).toBe(false);
+    expect(penButtonHover('pen', -1, 0, 0)).toBe(false);
+    expect(penButtonHover('pen', 0, 1, 0.4)).toBe(false);
+    expect(penButtonHover('mouse', 0, 1, 0)).toBe(false);
   });
 
   it('erases a square of the chosen size', () => {

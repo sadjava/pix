@@ -4,6 +4,7 @@ import type { ProjectRepository } from '../data/repository.ts';
 import { emptyHistory } from '../editor/history/patches.ts';
 import { applyBackupSuccess, decideSync, syncedRevision, type CloudTrace, type SyncTransport } from './protocol.ts';
 import { backoffMs } from './scheduler.ts';
+import { randomId } from '../export/checksum.ts';
 import { base64ToBytes, bytesToBase64, documentFromRow, rugFromDocument } from './restore.ts';
 
 export async function enqueueBackup(repo: ProjectRepository, record: ProjectRecord): Promise<OutboxRow> {
@@ -11,7 +12,7 @@ export async function enqueueBackup(repo: ProjectRepository, record: ProjectReco
   const row: OutboxRow = pending
     ? { ...pending, localRevision: record.documentRevision, status: 'pending', nextAttemptAt: Date.now() }
     : {
-        id: crypto.randomUUID(),
+        id: randomId(),
         projectId: record.id,
         localRevision: record.documentRevision,
         status: 'pending',

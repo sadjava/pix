@@ -26,15 +26,28 @@ export interface GesturePreview {
 }
 
 /**
- * Side button or eraser end.
- * Samsung's S Pen reports the side button as button 1 while the pen is still in the air.
+ * Side button or eraser end, including a contact event.
  * A finger never matches. A mouse right button does, because some tablets send the side button that way.
+ * Mouse middle button stays pan: button 1 with buttons bit 4.
  */
 export function stylusErasing(pointerType: string, button: number, buttons: number): boolean {
   if (pointerType === 'touch') return false;
+  if (pointerType === 'eraser') return true;
   if (button === 5 || (buttons & 32) !== 0) return true;
   if (button === 2 || (buttons & 2) !== 0) return true;
   return pointerType === 'pen' && (button === 1 || (buttons & 4) !== 0);
+}
+
+/**
+ * Side button while the pen is above the glass (pressure 0).
+ * `buttons` is what is held now. `button` is only which button changed, so a release
+ * still arrives as button 0 or 1 with buttons 0 and must not count as held.
+ * Chrome maps the S Pen button to the left bit while the tip is up.
+ */
+export function penButtonHover(pointerType: string, _button: number, buttons: number, pressure: number, tangentialPressure = 0): boolean {
+  if ((pointerType !== 'pen' && pointerType !== 'eraser') || pressure !== 0) return false;
+  if (pointerType === 'eraser' || tangentialPressure) return true;
+  return (buttons & (1 | 2 | 4 | 32)) !== 0;
 }
 
 interface StrokeGesture {

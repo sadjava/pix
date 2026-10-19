@@ -9,6 +9,7 @@ import { CanvasView } from './canvas/CanvasView.tsx';
 import { EditorSession as Session } from './session.ts';
 import { selectionSizeLabel } from './session.ts';
 import { ru } from '../i18n/ru.ts';
+import { randomId } from '../export/checksum.ts';
 import { pngBytes } from '../export/png.ts';
 import { exportProjectFile } from '../export/json.ts';
 import { enqueueBackup, drainOutbox } from '../backup/outbox.ts';
@@ -725,7 +726,7 @@ async function addTraces(
       frame.x += added * 6;
       frame.y += added * 6;
       const sprite: TraceSprite = {
-        id: crypto.randomUUID(),
+        id: randomId(),
         image: prepared.image,
         blob: prepared.blob,
         naturalWidth: prepared.image.width,

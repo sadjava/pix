@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { stylusErasing, type EditorSession } from '../session.ts';
+import { penButtonHover, stylusErasing, type EditorSession } from '../session.ts';
 import type { Viewport } from '../../model/types.ts';
 import { renderRgba } from '../../export/png.ts';
 import { ru } from '../../i18n/ru.ts';
@@ -100,40 +100,75 @@ export function CanvasView({
       );
       remember(session, viewport, onChange, saveTimer, wrap);
     };
+    const overDock = (target: EventTarget | null) => target instanceof Element && target.closest('.color-dock') !== null;
+    const eraseAt = (clientX: number, clientY: number) => {
+      const canvas = pixelRef.current;
+      if (!canvas) return;
+      const cell = screenToCell(clientX, clientY, canvas.getBoundingClientRect(), session.doc.viewport, window.devicePixelRatio || 1);
+      if (!session.penErase) session.setPenErase(true);
+      if (session.gesture?.kind !== 'stroke') session.pointerDown(cell);
+      else session.pointerMove(cell);
+      onChange();
+    };
+    const finishHoverErase = (pointerId: number) => {
+      sPenButton.current = false;
+      stylusErasePointers.current.clear();
+      pointers.current.clear();
+      pinch.current = null;
+      hands.current = false;
+      try {
+        if (wrap.hasPointerCapture(pointerId)) wrap.releasePointerCapture(pointerId);
+      } catch {
+        // The hover pointer was never captured.
+      }
+      if (session.penErase && session.gesture?.kind === 'stroke') {
+        session.setPenErase(false);
+        session.pointerUp();
+        onChange();
+      } else {
+        session.penErase = false;
+      }
+    };
     const blockTouch = (event: TouchEvent) => {
       if (event.touches.length > 0) event.preventDefault();
     };
     const keepPenButton = (event: PointerEvent) => {
-      if (event.pointerType !== 'pen') return;
-      const held = stylusErasing(event.pointerType, event.button, event.buttons);
+      const kind = event.pointerType as string;
+      if (kind !== 'pen' && kind !== 'eraser') return;
+      if (overDock(event.target)) return;
+      const hover = penButtonHover(event.pointerType, event.button, event.buttons, event.pressure, event.tangentialPressure);
       if (event.pressure === 0) {
-        if (held && session.gesture?.kind !== 'stroke') sPenButton.current = true;
+        if (!hover) {
+          if (sPenButton.current || session.penErase) finishHoverErase(event.pointerId);
+          return;
+        }
+        event.preventDefault();
+        sPenButton.current = true;
+        eraseAt(event.clientX, event.clientY);
         return;
       }
-      if (!held && !sPenButton.current) return;
+      const held = stylusErasing(event.pointerType, event.button, event.buttons);
+      if (!held) {
+        if (sPenButton.current) finishHoverErase(event.pointerId);
+        return;
+      }
       sPenButton.current = true;
       event.preventDefault();
       if (session.gesture?.kind === 'stroke') session.setPenErase(true);
     };
     const blockMenu = (event: Event) => {
       event.preventDefault();
-      if ('pointerType' in event && (event as PointerEvent).pointerType === 'pen') sPenButton.current = true;
     };
     wrap.addEventListener('wheel', onWheel, { passive: false });
     wrap.addEventListener('touchmove', blockTouch, { passive: false });
     wrap.addEventListener('pointerdown', keepPenButton, { capture: true, passive: false });
     wrap.addEventListener('pointermove', keepPenButton, { capture: true, passive: false });
-    const keepPenRaw = (event: Event) => {
-      if (event instanceof PointerEvent) keepPenButton(event);
-    };
-    wrap.addEventListener('pointerrawupdate', keepPenRaw, { capture: true, passive: false });
     wrap.addEventListener('contextmenu', blockMenu, { capture: true });
     return () => {
       wrap.removeEventListener('wheel', onWheel);
       wrap.removeEventListener('touchmove', blockTouch);
       wrap.removeEventListener('pointerdown', keepPenButton, { capture: true });
       wrap.removeEventListener('pointermove', keepPenButton, { capture: true });
-      wrap.removeEventListener('pointerrawupdate', keepPenRaw, { capture: true });
       wrap.removeEventListener('contextmenu', blockMenu, { capture: true });
     };
   }, [session, onChange]);
@@ -216,9 +251,8 @@ export function CanvasView({
       className={`canvas-wrap${cursor}`}
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => {
-        if (event.pointerType === 'pen' && event.pressure === 0) {
+        if ((event.pointerType === 'pen' || (event.pointerType as string) === 'eraser') && event.pressure === 0) {
           event.preventDefault();
-          if (stylusErasing(event.pointerType, event.button, event.buttons)) sPenButton.current = true;
           return;
         }
         try {
@@ -307,19 +341,8 @@ export function CanvasView({
         armed.current = cellAt(event);
       }}
       onPointerMove={(event) => {
-        if (event.pointerType === 'pen' && event.pressure === 0 && session.gesture?.kind !== 'stroke') {
-          if (stylusErasing(event.pointerType, event.button, event.buttons)) sPenButton.current = true;
-          return;
-        }
-        if (!pointers.current.has(event.pointerId)) {
-          if (event.pointerType !== 'pen' || !sPenButton.current) return;
-          pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-          try {
-            event.currentTarget.setPointerCapture(event.pointerId);
-          } catch {
-            // Hover already ended, or the pen went down on another target.
-          }
-        }
+        if ((event.pointerType === 'pen' || (event.pointerType as string) === 'eraser') && event.pressure === 0) return;
+        if (!pointers.current.has(event.pointerId)) return;
         pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
         if (hands.current) {
           const gesture = fingerPair(pointers.current, pixelRef.current);
@@ -391,14 +414,16 @@ export function CanvasView({
         onChange();
       }}
       onPointerLeave={(event) => {
-        if (event.pointerType === 'pen') sPenButton.current = false;
+        if (event.pointerType !== 'pen' || event.buttons !== 0) return;
+        const hoverStroke = sPenButton.current && session.penErase && session.gesture?.kind === 'stroke';
+        sPenButton.current = false;
+        if (!hoverStroke) return;
+        session.setPenErase(false);
+        session.pointerUp();
+        onChange();
       }}
       onPointerUp={(event) => {
-        if (event.pointerType === 'pen' && event.pressure === 0 && (event.button === 1 || event.button === 2 || event.button === 5)) {
-          sPenButton.current = false;
-          stylusErasePointers.current.delete(event.pointerId);
-          return;
-        }
+        if (event.pointerType === 'pen' && event.pressure === 0 && event.buttons === 0) sPenButton.current = false;
         if ((event.button === 2 || event.button === 5) && (event.buttons & 1) !== 0) {
           stylusErasePointers.current.delete(event.pointerId);
           session.setPenErase(false);

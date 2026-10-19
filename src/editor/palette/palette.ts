@@ -1,4 +1,5 @@
 import type { PaletteColor } from '../../model/types.ts';
+import { randomId } from '../../export/checksum.ts';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
@@ -28,7 +29,7 @@ export function pickRecentColor(
     const slot = slotOf(existing);
     return { palette, order: [...order.filter((item) => item !== slot), slot], slot };
   }
-  const next = [...palette, { id: crypto.randomUUID(), name: normalized, hex: normalized }];
+  const next = [...palette, { id: randomId(), name: normalized, hex: normalized }];
   const slot = slotOf(next.length - 1);
   return { palette: next, order: [...order, slot], slot };
 }

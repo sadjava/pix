@@ -3,7 +3,7 @@ import { SCHEMA_VERSION } from '../model/types.ts';
 import { createDocument } from '../editor/canvas/grid.ts';
 import { clipHistory, emptyHistory, parseHistory, type HistoryStacks } from '../editor/history/patches.ts';
 import { cellsToBytes } from '../export/json.ts';
-import { arrayBuffer } from '../export/checksum.ts';
+import { arrayBuffer, randomId } from '../export/checksum.ts';
 import { migrateDocument, recoverCells } from './recover.ts';
 import { createDb, type JournalRow, type RugDB, type SnapshotRow, type TraceRow } from './db.ts';
 
@@ -64,7 +64,7 @@ export class ProjectRepository {
     const now = input.now ?? new Date().toISOString();
     const doc = createDocument(input.width, input.height);
     const record: ProjectRecord = {
-      id: input.id ?? crypto.randomUUID(),
+      id: input.id ?? randomId(),
       name: input.name.trim() || 'Новый ковёр',
       width: doc.width,
       height: doc.height,
@@ -97,7 +97,7 @@ export class ProjectRepository {
     const now = new Date().toISOString();
     const record: ProjectRecord = {
       ...loaded.record,
-      id: crypto.randomUUID(),
+      id: randomId(),
       name: `${loaded.record.name} копия`,
       documentRevision: 1,
       createdAt: now,
@@ -113,7 +113,7 @@ export class ProjectRepository {
     const history = emptyHistory();
     const traces = await this.listTraces(id);
     await this.write(record, loaded.doc, history);
-    await this.db.traces.bulkPut(traces.map((row) => ({ ...row, id: crypto.randomUUID(), projectId: record.id })));
+    await this.db.traces.bulkPut(traces.map((row) => ({ ...row, id: randomId(), projectId: record.id })));
     return { record, doc: loaded.doc, history };
   }
 

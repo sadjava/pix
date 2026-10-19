@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../editor/canvas/grid.ts';
 import { collectKeys, exportProjectFile, parseProjectFile } from './json.ts';
+import { uuidFromBytes } from './checksum.ts';
 import { pngBytes, renderRgba, rugPreview } from './png.ts';
 
 describe('png export', () => {
@@ -69,5 +70,11 @@ describe('json project files', () => {
     expect(parseProjectFile('{').ok).toBe(false);
     expect(parseProjectFile(JSON.stringify({ schemaVersion: 9, name: 'x' })).ok).toBe(false);
     expect(parseProjectFile(JSON.stringify({ schemaVersion: 1, token: 'secret' })).ok).toBe(false);
+  });
+
+  it('builds a uuid when randomUUID is missing', () => {
+    const bytes = new Uint8Array(16);
+    bytes[0] = 0xab;
+    expect(uuidFromBytes(bytes)).toBe('ab000000-0000-4000-8000-000000000000');
   });
 });

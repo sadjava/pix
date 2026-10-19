@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../editor/canvas/grid.ts';
 import { collectKeys, exportProjectFile, parseProjectFile } from './json.ts';
-import { pngBytes, renderRgba } from './png.ts';
+import { pngBytes, renderRgba, rugPreview } from './png.ts';
 
 describe('png export', () => {
   it('is deterministic and keeps grid and checkerboard independent', () => {
@@ -24,6 +24,28 @@ describe('png export', () => {
     const twice = pngBytes(doc, { grid: true, checker: true, pixelsPerCell: 3, border: false, checkerBlock: 2 });
     expect([...once]).toEqual([...twice]);
     expect(once[0]).toBe(137);
+  });
+
+  it('copies rug rows into the preview without wrapping them', () => {
+    const doc = createDocument(100, 8);
+    doc.cells[100] = 1;
+    const image = rugPreview(doc, 216);
+    expect(image.width).toBe(200);
+    expect(image.height).toBe(16);
+    const pixel = (x: number, y: number) => {
+      const index = (y * image.width + x) * 4;
+      return [image.data[index], image.data[index + 1], image.data[index + 2], image.data[index + 3]];
+    };
+    expect(pixel(0, 0)).toEqual([0, 0, 0, 0]);
+    expect(pixel(0, 2)).toEqual([26, 22, 20, 255]);
+    expect(pixel(1, 2)).toEqual([26, 22, 20, 255]);
+    expect(pixel(2, 2)[3]).toBe(0);
+    const wide = createDocument(13, 2);
+    wide.cells[13] = 1;
+    const rows = rugPreview(wide, 200);
+    expect(rows.width % 13).toBe(0);
+    expect(rows.data[3]).toBe(0);
+    expect(rows.data[(rows.width * (rows.height / 2)) * 4 + 3]).toBe(255);
   });
 });
 

@@ -25,6 +25,12 @@ export interface GesturePreview {
   clipped: boolean;
 }
 
+/** Side button or eraser end of a pen. Mice and fingers never match, even with the same bits. */
+export function stylusErasing(pointerType: string, button: number, buttons: number): boolean {
+  if (pointerType !== 'pen') return false;
+  return button === 2 || button === 5 || (buttons & (2 | 4 | 32)) !== 0;
+}
+
 interface StrokeGesture {
   kind: 'stroke';
   tool: 'pencil' | 'eraser';
@@ -32,6 +38,7 @@ interface StrokeGesture {
   patches: Map<number, CellPatch>;
   sinceCheckpoint: CellPatch[];
   lastCheckpointAt: number;
+  resume: boolean;
 }
 
 interface ShapeGesture {
@@ -89,6 +96,7 @@ export class EditorSession {
   pasteClipped = false;
   revision: number;
   gesture: Gesture | null = null;
+  penErase = false;
   notice: string | null = null;
   onPersist: ((payload: EditorPersistPayload) => void) | null = null;
   private now: () => number;
@@ -141,8 +149,29 @@ export class EditorSession {
     if (palette !== this.doc.palette) this.setView({ palette });
   }
 
+  setPenErase(erasing: boolean): void {
+    this.penErase = erasing;
+    const stroke = this.gesture?.kind === 'stroke' ? this.gesture : null;
+    if (!stroke) return;
+    if (erasing || this.tool === 'eraser') {
+      stroke.tool = 'eraser';
+      this.extendStroke(stroke.last);
+      return;
+    }
+    if (this.tool === 'pencil') {
+      stroke.tool = 'pencil';
+      stroke.resume = true;
+      return;
+    }
+    this.pointerUp();
+  }
+
   pointerDown(cell: Point | null): void {
     if (!cell) return;
+    if (this.penErase && this.tool !== 'pan') {
+      this.beginStroke(cell, 'eraser');
+      return;
+    }
     if (this.tool === 'pan' || this.tool === 'trace') return;
     if (this.tool === 'picker') {
       const slot = getCell(this.doc, cell.x, cell.y);
@@ -158,16 +187,7 @@ export class EditorSession {
       return;
     }
     if (this.tool === 'pencil' || this.tool === 'eraser') {
-      const patches = new Map<number, CellPatch>();
-      this.gesture = {
-        kind: 'stroke',
-        tool: this.tool,
-        last: cell,
-        patches,
-        sinceCheckpoint: [],
-        lastCheckpointAt: this.now(),
-      };
-      this.extendStroke(cell);
+      this.beginStroke(cell, this.tool);
       return;
     }
     if (this.tool === 'line' || this.tool === 'circle' || this.tool === 'rect' || this.tool === 'diamond') {
@@ -501,6 +521,20 @@ export class EditorSession {
     this.persist('replace', [], false);
   }
 
+  private beginStroke(cell: Point, tool: 'pencil' | 'eraser'): void {
+    if (this.tool !== 'select') this.selection = null;
+    this.gesture = {
+      kind: 'stroke',
+      tool,
+      last: cell,
+      patches: new Map(),
+      sinceCheckpoint: [],
+      lastCheckpointAt: this.now(),
+      resume: false,
+    };
+    this.extendStroke(cell);
+  }
+
   private stamp(cell: Point): Point[] {
     const size = this.gesture?.kind === 'stroke' && this.gesture.tool === 'eraser' ? this.eraserSize : this.brushSize;
     if (this.gesture?.kind !== 'stroke') return [cell];
@@ -527,7 +561,13 @@ export class EditorSession {
 
   private extendStroke(cell: Point): void {
     if (!this.gesture || this.gesture.kind !== 'stroke') return;
-    const segment = lineCells(this.gesture.last, cell).flatMap((point) => this.stamp(point));
+    let points = lineCells(this.gesture.last, cell);
+    if (this.gesture.resume) {
+      this.gesture.resume = false;
+      const held = this.gesture.last;
+      points = points.filter((point) => point.x !== held.x || point.y !== held.y);
+    }
+    const segment = points.flatMap((point) => this.stamp(point));
     const value = this.gesture.tool === 'eraser' ? 0 : this.colorSlot;
     const reflected = reflectPoints(segment, this.doc.symmetry, this.doc.width, this.doc.height);
     const patches = patchesForValues(this.doc.cells, this.doc.width, this.doc.height, reflected, () => value);

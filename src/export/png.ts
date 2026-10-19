@@ -46,6 +46,49 @@ export function renderRgba(doc: ProjectDocument, options: ExportOptions): {
   return { width, height, data };
 }
 
+/** Gallery thumbnail. Whole cells only: each stitch is copied, never blended into the next row. */
+export function rugPreview(doc: ProjectDocument, maxWidth: number): {
+  width: number;
+  height: number;
+  data: Uint8Array;
+} {
+  const box = Math.max(1, Math.floor(maxWidth));
+  const zoom = Math.floor(box / Math.max(1, doc.width));
+  if (zoom >= 1) {
+    return renderRgba(doc, {
+      grid: false,
+      checker: doc.checkerVisible,
+      pixelsPerCell: zoom,
+      border: false,
+      checkerBlock: doc.checkerBlock,
+    });
+  }
+  const width = Math.min(box, doc.width);
+  const height = Math.max(1, Math.round((doc.height * width) / doc.width));
+  const data = new Uint8Array(width * height * 4);
+  const options: ExportOptions = {
+    grid: false,
+    checker: doc.checkerVisible,
+    pixelsPerCell: 1,
+    border: false,
+    checkerBlock: doc.checkerBlock,
+  };
+  for (let y = 0; y < height; y += 1) {
+    const sy = Math.min(doc.height - 1, Math.floor((y * doc.height) / height));
+    for (let x = 0; x < width; x += 1) {
+      const sx = Math.min(doc.width - 1, Math.floor((x * doc.width) / width));
+      const slot = doc.cells[sy * doc.width + sx] ?? 0;
+      const color = slot === 0 ? emptyColor(sx, sy, options) : hexRgba(doc.palette[slot - 1]);
+      const index = (y * width + x) * 4;
+      data[index] = color[0];
+      data[index + 1] = color[1];
+      data[index + 2] = color[2];
+      data[index + 3] = color[3];
+    }
+  }
+  return { width, height, data };
+}
+
 function emptyColor(x: number, y: number, options: ExportOptions): Rgba {
   if (!options.checker) return [0, 0, 0, 0];
   const block = Math.max(1, options.checkerBlock);

@@ -4,7 +4,7 @@ import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
 import { pickRecentColor } from './palette/palette.ts';
-import { EditorSession } from './session.ts';
+import { EditorSession, stylusErasing } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
 import { circleCells, diamondCells, rectOutline } from './tools/shapes.ts';
@@ -114,6 +114,29 @@ describe('pencil, eraser, fill, picker', () => {
     expect(editor.doc.cells[2 * 8 + 1]).toBe(1);
     expect(editor.doc.cells[2 * 8 + 2]).toBe(1);
     expect(editor.doc.cells[0]).toBe(0);
+  });
+
+  it('erases only while the stylus button is held', () => {
+    const editor = session();
+    editor.doc.cells[0] = 1;
+    editor.tool = 'pencil';
+    editor.setPenErase(true);
+    editor.pointerDown({ x: 0, y: 0 });
+    editor.pointerMove({ x: 1, y: 0 });
+    editor.setPenErase(false);
+    editor.pointerMove({ x: 2, y: 0 });
+    editor.pointerUp();
+    expect(editor.doc.cells[0]).toBe(0);
+    expect(editor.doc.cells[1]).toBe(0);
+    expect(editor.doc.cells[2]).toBe(1);
+    expect(editor.tool).toBe('pencil');
+    expect(editor.history.undo).toHaveLength(1);
+    expect(stylusErasing('pen', -1, 1)).toBe(false);
+    expect(stylusErasing('pen', 2, 2)).toBe(true);
+    expect(stylusErasing('pen', 5, 32)).toBe(true);
+    expect(stylusErasing('pen', -1, 1 | 4)).toBe(true);
+    expect(stylusErasing('mouse', 2, 2)).toBe(false);
+    expect(stylusErasing('touch', 5, 32)).toBe(false);
   });
 
   it('erases a square of the chosen size', () => {

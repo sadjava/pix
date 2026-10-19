@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { EditorSession } from '../session.ts';
+import { stylusErasing, type EditorSession } from '../session.ts';
 import type { Viewport } from '../../model/types.ts';
 import { renderRgba } from '../../export/png.ts';
 import { ru } from '../../i18n/ru.ts';
@@ -187,7 +187,7 @@ export function CanvasView({
       className={`canvas-wrap${cursor}`}
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => {
-        if (event.button === 2) return;
+        if (event.pointerType !== 'pen' && event.button === 2) return;
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
         } catch {
@@ -204,11 +204,17 @@ export function CanvasView({
           axisDrag.current = null;
           setAxisCursor(null);
           setReadout(null);
+          session.penErase = false;
           session.cancelGesture();
           commitTrace();
           const gesture = fingerPair(pointers.current, pixelRef.current);
           if (gesture) pinch.current = { ...gesture, viewport: { ...session.doc.viewport } };
           onChange();
+          return;
+        }
+        if (stylusErasing(event.pointerType, event.button, event.buttons)) {
+          session.setPenErase(true);
+          if (session.gesture?.kind !== 'stroke') armed.current = cellAt(event);
           return;
         }
         if (event.button === 1 || space.current) {
@@ -323,6 +329,8 @@ export function CanvasView({
           onChange();
           return;
         }
+        const erase = stylusErasing(event.pointerType, event.button, event.buttons);
+        if (erase !== session.penErase && (armed.current || session.gesture?.kind === 'stroke')) session.setPenErase(erase);
         if (armed.current) {
           session.pointerDown(armed.current);
           armed.current = null;
@@ -331,10 +339,16 @@ export function CanvasView({
         onChange();
       }}
       onPointerUp={(event) => {
+        if (event.pointerType === 'pen' && (event.buttons & 1) !== 0) {
+          session.setPenErase(stylusErasing(event.pointerType, event.button, event.buttons));
+          onChange();
+          return;
+        }
         pointers.current.delete(event.pointerId);
         if (pointers.current.size < 2) pinch.current = null;
         if (hands.current) {
           if (pointers.current.size === 0) hands.current = false;
+          session.penErase = false;
           onChange();
           return;
         }
@@ -375,6 +389,7 @@ export function CanvasView({
           session.pointerDown(armed.current);
           armed.current = null;
         }
+        session.setPenErase(false);
         session.pointerUp();
         onChange();
       }}
@@ -383,6 +398,7 @@ export function CanvasView({
         pinch.current = null;
         hands.current = false;
         armed.current = null;
+        session.penErase = false;
         pasteDrag.current = null;
         resizeDrag.current = null;
         rotateDrag.current = false;

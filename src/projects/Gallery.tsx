@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RugRow } from '../backup/protocol.ts';
 import { documentFromRow } from '../backup/restore.ts';
 import { forgetDeleted, rememberDeleted, syncAccount } from '../backup/outbox.ts';
@@ -6,6 +6,7 @@ import { repository } from '../data/instance.ts';
 import { requestPersistentStorage, storageIsPersisted } from '../data/storage.ts';
 import { sizeDecision } from '../editor/canvas/grid.ts';
 import { emptyHistory } from '../editor/history/patches.ts';
+import { rugPreview } from '../export/png.ts';
 import { ru } from '../i18n/ru.ts';
 import type { ProjectRecord } from '../model/types.ts';
 
@@ -109,7 +110,6 @@ export function Gallery({ onOpen }: { onOpen: (id: string) => void }) {
           <li key={project.id} className="rug">
             <button type="button" className="rug-open" onClick={() => onOpen(project.id)}>
               <Preview id={project.id} />
-              <span className="fringe" />
               <strong>{project.name}</strong>
               <span>{project.width} × {project.height} {ru.cells}</span>
               <span>{new Date(project.updatedAt).toLocaleString('ru')}</span>
@@ -177,27 +177,24 @@ function backupText(state: ProjectRecord['syncState']): string {
 }
 
 function Preview({ id }: { id: string }) {
-  const [colors, setColors] = useState<string[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let gone = false;
     void repository.load(id).then((loaded) => {
-      if (!('doc' in loaded)) return;
-      const next: string[] = [];
-      const stepX = Math.max(1, Math.floor(loaded.doc.width / 12));
-      const stepY = Math.max(1, Math.floor(loaded.doc.height / 8));
-      for (let y = 0; y < loaded.doc.height; y += stepY) {
-        for (let x = 0; x < loaded.doc.width; x += stepX) {
-          const slot = loaded.doc.cells[y * loaded.doc.width + x] ?? 0;
-          next.push(slot === 0 ? 'transparent' : loaded.doc.palette[slot - 1]?.hex ?? 'transparent');
-        }
-      }
-      setColors(next);
+      if (gone || !canvas.isConnected || !('doc' in loaded)) return;
+      const measured = canvas.parentElement?.clientWidth ?? 0;
+      const image = rugPreview(loaded.doc, measured > 0 ? measured : 216);
+      canvas.width = image.width;
+      canvas.height = image.height;
+      canvas.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(image.data), image.width, image.height), 0, 0);
     });
+    return () => {
+      gone = true;
+    };
   }, [id]);
-  return (
-    <span className="preview" aria-hidden="true">
-      {colors.map((color, index) => <i key={index} style={{ background: color }} />)}
-    </span>
-  );
+  return <canvas ref={canvasRef} className="preview" width={1} height={1} aria-hidden="true" />;
 }
 
 async function createProject(

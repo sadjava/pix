@@ -7,7 +7,7 @@ import { axisLabel } from '../symmetry/axisLabel.ts';
 import { Icon } from '../icons.tsx';
 import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, containViewport, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
-import type { SelectionHandle, SelectionRect } from '../selection/selection.ts';
+import { snapRotation, type SelectionHandle, type SelectionRect } from '../selection/selection.ts';
 import { gripAt, placeTrace, type SourceCrop, type TraceFrame, type TraceGrip, type TraceSprite } from '../trace/trace.ts';
 
 type AxisName = 'vertical' | 'horizontal';
@@ -36,6 +36,7 @@ export function CanvasView({
   const armed = useRef<{ x: number; y: number } | null>(null);
   const pasteDrag = useRef<{ x: number; y: number } | null>(null);
   const resizeDrag = useRef<SelectionHandle | null>(null);
+  const rotateDrag = useRef(false);
   const panning = useRef(false);
   const axisDrag = useRef<AxisName | null>(null);
   const traceDrag = useRef<{ id: string; grip: TraceGrip; frame: TraceFrame; crop: SourceCrop; x: number; y: number } | null>(null);
@@ -199,6 +200,7 @@ export function CanvasView({
           panning.current = false;
           pasteDrag.current = null;
           resizeDrag.current = null;
+          rotateDrag.current = false;
           axisDrag.current = null;
           setAxisCursor(null);
           setReadout(null);
@@ -219,6 +221,11 @@ export function CanvasView({
           return;
         }
         if (session.tool === 'select' && session.selection) {
+          if (rotateHandleAt(session, event.clientX, event.clientY, event.currentTarget)) {
+            session.startRotate();
+            rotateDrag.current = true;
+            return;
+          }
           const handle = selectionHandleAt(session, event.clientX, event.clientY, event.currentTarget);
           if (handle) {
             session.startScale();
@@ -292,6 +299,11 @@ export function CanvasView({
           onChange();
           return;
         }
+        if (rotateDrag.current) {
+          session.previewRotate(snapRotation(rotationAt(session, event.clientX, event.clientY, event.currentTarget)));
+          onChange();
+          return;
+        }
         if (resizeDrag.current) {
           const cell = cellAt(event);
           if (cell) session.previewScale(resizeDrag.current, cell);
@@ -335,9 +347,12 @@ export function CanvasView({
           onChange();
           return;
         }
-        if (resizeDrag.current) {
+        if (resizeDrag.current || rotateDrag.current) {
+          const rotating = rotateDrag.current;
           resizeDrag.current = null;
-          session.commitScale();
+          rotateDrag.current = false;
+          if (rotating) session.commitRotate();
+          else session.commitScale();
           onChange();
           return;
         }
@@ -370,6 +385,7 @@ export function CanvasView({
         armed.current = null;
         pasteDrag.current = null;
         resizeDrag.current = null;
+        rotateDrag.current = false;
         panning.current = false;
         commitTrace();
         axisDrag.current = null;
@@ -557,7 +573,7 @@ function draw(
   }
   if (session.selection) {
     strokeRect(overlayCtx, session.selection, viewport, '#243e66');
-    if (session.tool === 'select') drawHandles(overlayCtx, session.selection, viewport);
+    if (session.tool === 'select' && session.selection) drawHandles(overlayCtx, session.selection, viewport, session.rotationDegrees);
   }
   if (session.pasteOrigin && session.clipboard) {
     const clip = session.clipboard;
@@ -619,10 +635,46 @@ function strokeRect(
   ctx.strokeRect(viewport.panX + rect.x * cellPx, viewport.panY + rect.y * cellPx, rect.width * cellPx, rect.height * cellPx);
 }
 
+const ROTATE_LIFT = 36;
+const HANDLE_HIT = 22;
+
+function rotateKnob(rect: SelectionRect, viewport: Viewport): { x: number; y: number } {
+  const cellPx = viewport.cellSize * viewport.scale;
+  const left = viewport.panX + rect.x * cellPx;
+  const top = viewport.panY + rect.y * cellPx;
+  return { x: left + (rect.width * cellPx) / 2, y: top - ROTATE_LIFT };
+}
+
+function pointerIn(wrap: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
+  const box = wrap.getBoundingClientRect();
+  return { x: clientX - box.left, y: clientY - box.top };
+}
+
+function rotationAt(session: EditorSession, clientX: number, clientY: number, wrap: HTMLElement): number {
+  const rect = session.selection;
+  if (!rect) return 0;
+  const point = pointerIn(wrap, clientX, clientY);
+  const cellPx = session.doc.viewport.cellSize * session.doc.viewport.scale;
+  const left = session.doc.viewport.panX + rect.x * cellPx;
+  const top = session.doc.viewport.panY + rect.y * cellPx;
+  const cx = left + (rect.width * cellPx) / 2;
+  const cy = top + (rect.height * cellPx) / 2;
+  return Math.atan2(point.y - cy, point.x - cx) + Math.PI / 2;
+}
+
+function rotateHandleAt(session: EditorSession, clientX: number, clientY: number, wrap: HTMLElement): boolean {
+  const rect = session.selection;
+  if (!rect || wrap.getBoundingClientRect().width <= 0) return false;
+  const point = pointerIn(wrap, clientX, clientY);
+  const knob = rotateKnob(rect, session.doc.viewport);
+  return Math.hypot(point.x - knob.x, point.y - knob.y) <= HANDLE_HIT;
+}
+
 function drawHandles(
   ctx: CanvasRenderingContext2D,
   rect: SelectionRect,
   viewport: Viewport,
+  degrees: number | null,
 ): void {
   const cellPx = viewport.cellSize * viewport.scale;
   const left = viewport.panX + rect.x * cellPx;
@@ -639,9 +691,23 @@ function drawHandles(
     ctx.fillRect(x - size, y - size, size * 2, size * 2);
     ctx.strokeRect(x - size, y - size, size * 2, size * 2);
   }
+  const knob = rotateKnob(rect, viewport);
+  ctx.beginPath();
+  ctx.moveTo(midX, top);
+  ctx.lineTo(knob.x, knob.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(knob.x, knob.y, size, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  if (degrees != null) {
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = '#243e66';
+    ctx.fillText(`${degrees}°`, knob.x, knob.y - 10);
+  }
 }
-
-const HANDLE_HIT = 22;
 
 function selectionHandleAt(
   session: EditorSession,

@@ -8,7 +8,7 @@ import { EditorSession } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
 import { circleCells, diamondCells, rectOutline } from './tools/shapes.ts';
-import { normalizeSelection, resizeSelectionRect } from './selection/selection.ts';
+import { normalizeSelection, resizeSelectionRect, rotateRegion, snapRotation } from './selection/selection.ts';
 import { CHECKPOINT_MS } from '../model/types.ts';
 
 function session(width = 8, height = 8, now = () => 0): EditorSession {
@@ -386,6 +386,61 @@ describe('selection', () => {
     expect([...editor.doc.cells.slice(0, 4)]).toEqual([1, 2, 0, 0]);
   });
 
+  it('copies a selection exactly at 90, 180, 270 and 360 degrees', () => {
+    const editor = session(8, 8);
+    const rect = { x: 2, y: 2, width: 3, height: 2 };
+    const pattern = [1, 2, 3, 4, 5, 6];
+    paint(editor, rect, pattern);
+    const original = editor.doc.cells.slice();
+    editor.selection = { ...rect };
+
+    turn(editor, 0);
+    turn(editor, Math.PI * 2);
+    expect([...editor.doc.cells]).toEqual([...original]);
+    expect(editor.selection).toEqual(rect);
+
+    turn(editor, Math.PI / 2);
+    expect(editor.selection).toEqual({ x: 2, y: 2, width: 2, height: 3 });
+    expect(taken(editor, editor.selection)).toEqual([4, 1, 5, 2, 6, 3]);
+    expect(tally(editor.doc.cells)).toEqual(tally(original));
+    editor.undo();
+    expect([...editor.doc.cells]).toEqual([...original]);
+    editor.selection = { ...rect };
+
+    turn(editor, Math.PI);
+    expect(editor.selection).toEqual(rect);
+    expect(taken(editor, rect)).toEqual([6, 5, 4, 3, 2, 1]);
+    expect(tally(editor.doc.cells)).toEqual(tally(original));
+    editor.undo();
+    editor.selection = { ...rect };
+
+    turn(editor, (Math.PI * 3) / 2);
+    expect(taken(editor, editor.selection)).toEqual([3, 6, 2, 5, 1, 4]);
+    expect(tally(editor.doc.cells)).toEqual(tally(original));
+    editor.undo();
+    editor.selection = { ...rect };
+
+    for (let step = 0; step < 4; step += 1) turn(editor, Math.PI / 2);
+    expect([...editor.doc.cells]).toEqual([...original]);
+    expect(editor.selection).toEqual(rect);
+
+    const edge = session(8, 8);
+    const edgeRect = { x: 0, y: 0, width: 2, height: 5 };
+    paint(edge, edgeRect, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const edgeBefore = edge.doc.cells.slice();
+    edge.selection = { ...edgeRect };
+    turn(edge, Math.PI / 2);
+    expect(tally(edge.doc.cells)).toEqual(tally(edgeBefore));
+
+    paint(editor, rect, pattern);
+    editor.selection = { ...rect };
+    const spun = rotateRegion(editor.doc.cells, 8, 8, rect, Uint16Array.from(pattern), Math.PI / 7);
+    const allowed = new Set([0, 1, 2, 3, 4, 5, 6]);
+    for (const patch of spun.patches) expect(allowed.has(patch.after)).toBe(true);
+    expect(snapRotation((88 * Math.PI) / 180)).toBeCloseTo(Math.PI / 2);
+    expect(snapRotation((80 * Math.PI) / 180)).toBeCloseTo((80 * Math.PI) / 180);
+  });
+
   it('resizes a selection from an edge or a corner and stays on the canvas', () => {
     const origin = { x: 2, y: 2, width: 4, height: 3 };
     expect(resizeSelectionRect(origin, 'e', { x: 10, y: 2 }, 20, 20)).toEqual({ x: 2, y: 2, width: 9, height: 3 });
@@ -446,6 +501,40 @@ describe('selection', () => {
     expect(painted.length).toBe(1);
   });
 });
+
+function paint(
+  editor: EditorSession,
+  rect: { x: number; y: number; width: number; height: number },
+  values: number[],
+): void {
+  for (let i = 0; i < values.length; i += 1) {
+    const x = rect.x + (i % rect.width);
+    const y = rect.y + Math.floor(i / rect.width);
+    editor.doc.cells[y * editor.doc.width + x] = values[i] ?? 0;
+  }
+}
+
+function turn(editor: EditorSession, radians: number): void {
+  editor.startRotate();
+  editor.previewRotate(radians);
+  editor.commitRotate();
+}
+
+function taken(
+  editor: EditorSession,
+  rect: { x: number; y: number; width: number; height: number } | null,
+): number[] {
+  if (!rect) return [];
+  const out: number[] = [];
+  for (let y = 0; y < rect.height; y += 1) {
+    for (let x = 0; x < rect.width; x += 1) out.push(editor.doc.cells[(rect.y + y) * editor.doc.width + rect.x + x] ?? 0);
+  }
+  return out;
+}
+
+function tally(cells: ArrayLike<number>): number[] {
+  return Array.from(cells).sort((a, b) => a - b);
+}
 
 describe('document limits', () => {
   it('rejects bad sizes and reports cropping', () => {

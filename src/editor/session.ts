@@ -12,6 +12,7 @@ import {
   moveRegion,
   normalizeSelection,
   resizeSelectionRect,
+  rotateRegion,
   scaleRegion,
   type SelectionHandle,
   type SelectionRect,
@@ -227,6 +228,7 @@ export class EditorSession {
 
   cancelGesture(): void {
     this.cancelScale();
+    this.cancelRotate();
     if (!this.gesture) return;
     if (this.gesture.kind === 'stroke') {
       const patches = [...this.gesture.patches.values()];
@@ -313,6 +315,7 @@ export class EditorSession {
 
   startScale(): void {
     this.cancelScale();
+    this.cancelRotate();
     const rect = this.selection;
     if (!rect) return;
     const cells = new Uint16Array(rect.width * rect.height);
@@ -347,13 +350,64 @@ export class EditorSession {
     this.commit('scale', patches, true);
   }
 
+  rotationDegrees: number | null = null;
+
   private scaleSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
+  private rotateSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
 
   private cancelScale(): void {
     if (!this.scaleSource) return;
     applyPatches(this.doc.cells, this.scaleSource.patches, 'back');
     this.selection = this.scaleSource.rect;
     this.scaleSource = null;
+  }
+
+  startRotate(): void {
+    this.cancelScale();
+    this.cancelRotate();
+    const rect = this.selection;
+    if (!rect) return;
+    const cells = new Uint16Array(rect.width * rect.height);
+    for (let y = 0; y < rect.height; y += 1) {
+      for (let x = 0; x < rect.width; x += 1) {
+        const gx = rect.x + x;
+        const gy = rect.y + y;
+        cells[y * rect.width + x] = gx >= 0 && gy >= 0 && gx < this.doc.width && gy < this.doc.height
+          ? (this.doc.cells[gy * this.doc.width + gx] ?? 0)
+          : 0;
+      }
+    }
+    this.rotateSource = { rect, cells, patches: [] };
+    this.rotationDegrees = 0;
+  }
+
+  previewRotate(radians: number): void {
+    const source = this.rotateSource;
+    if (!source) return;
+    applyPatches(this.doc.cells, source.patches, 'back');
+    const turned = rotateRegion(this.doc.cells, this.doc.width, this.doc.height, source.rect, source.cells, radians);
+    applyPatches(this.doc.cells, turned.patches, 'forward');
+    source.patches = turned.patches;
+    this.selection = turned.rect;
+    const degrees = Math.round((radians * 180) / Math.PI);
+    this.rotationDegrees = ((degrees % 360) + 360) % 360;
+  }
+
+  commitRotate(): void {
+    if (!this.rotateSource) return;
+    const patches = this.rotateSource.patches;
+    this.rotateSource = null;
+    this.rotationDegrees = null;
+    if (patches.length === 0) return;
+    this.commit('rotate', patches, true);
+  }
+
+  private cancelRotate(): void {
+    if (!this.rotateSource) return;
+    applyPatches(this.doc.cells, this.rotateSource.patches, 'back');
+    this.selection = this.rotateSource.rect;
+    this.rotateSource = null;
+    this.rotationDegrees = null;
   }
 
   clearSelection(): void {

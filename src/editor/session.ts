@@ -25,12 +25,16 @@ export interface GesturePreview {
   clipped: boolean;
 }
 
-/** Side button or eraser end. A finger never matches. A mouse right button does: some tablets report the stylus button that way. */
+/**
+ * Side button or eraser end.
+ * Samsung's S Pen reports the side button as button 1 while the pen is still in the air.
+ * A finger never matches. A mouse right button does, because some tablets send the side button that way.
+ */
 export function stylusErasing(pointerType: string, button: number, buttons: number): boolean {
   if (pointerType === 'touch') return false;
   if (button === 5 || (buttons & 32) !== 0) return true;
   if (button === 2 || (buttons & 2) !== 0) return true;
-  return pointerType === 'pen' && (buttons & 4) !== 0;
+  return pointerType === 'pen' && (button === 1 || (buttons & 4) !== 0);
 }
 
 interface StrokeGesture {

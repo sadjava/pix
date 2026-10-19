@@ -135,6 +135,7 @@ describe('pencil, eraser, fill, picker', () => {
     expect(stylusErasing('pen', 2, 2)).toBe(true);
     expect(stylusErasing('pen', 5, 32)).toBe(true);
     expect(stylusErasing('pen', -1, 1 | 4)).toBe(true);
+    expect(stylusErasing('pen', 1, 0)).toBe(true);
     expect(stylusErasing('mouse', 2, 2)).toBe(true);
     expect(stylusErasing('mouse', 1, 4)).toBe(false);
     expect(stylusErasing('touch', 5, 32)).toBe(false);

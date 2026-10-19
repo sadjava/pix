@@ -25,10 +25,12 @@ export interface GesturePreview {
   clipped: boolean;
 }
 
-/** Side button or eraser end of a pen. Mice and fingers never match, even with the same bits. */
+/** Side button or eraser end. A finger never matches. A mouse right button does: some tablets report the stylus button that way. */
 export function stylusErasing(pointerType: string, button: number, buttons: number): boolean {
-  if (pointerType !== 'pen') return false;
-  return button === 2 || button === 5 || (buttons & (2 | 4 | 32)) !== 0;
+  if (pointerType === 'touch') return false;
+  if (button === 5 || (buttons & 32) !== 0) return true;
+  if (button === 2 || (buttons & 2) !== 0) return true;
+  return pointerType === 'pen' && (buttons & 4) !== 0;
 }
 
 interface StrokeGesture {

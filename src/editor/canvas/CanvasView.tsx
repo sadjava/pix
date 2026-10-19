@@ -31,6 +31,7 @@ export function CanvasView({
   const pixelRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const stylusErasePointers = useRef(new Set<number>());
   const pinch = useRef<{ distance: number; midX: number; midY: number; viewport: Viewport } | null>(null);
   const hands = useRef(false);
   const armed = useRef<{ x: number; y: number } | null>(null);
@@ -187,7 +188,6 @@ export function CanvasView({
       className={`canvas-wrap${cursor}`}
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => {
-        if (event.pointerType !== 'pen' && event.button === 2) return;
         try {
           event.currentTarget.setPointerCapture(event.pointerId);
         } catch {
@@ -204,6 +204,7 @@ export function CanvasView({
           axisDrag.current = null;
           setAxisCursor(null);
           setReadout(null);
+          stylusErasePointers.current.clear();
           session.penErase = false;
           session.cancelGesture();
           commitTrace();
@@ -213,8 +214,11 @@ export function CanvasView({
           return;
         }
         if (stylusErasing(event.pointerType, event.button, event.buttons)) {
+          event.preventDefault();
+          stylusErasePointers.current.add(event.pointerId);
           session.setPenErase(true);
-          if (session.gesture?.kind !== 'stroke') armed.current = cellAt(event);
+          if (session.gesture?.kind !== 'stroke') session.pointerDown(cellAt(event));
+          onChange();
           return;
         }
         if (event.button === 1 || space.current) {
@@ -329,8 +333,10 @@ export function CanvasView({
           onChange();
           return;
         }
-        const erase = stylusErasing(event.pointerType, event.button, event.buttons);
-        if (erase !== session.penErase && (armed.current || session.gesture?.kind === 'stroke')) session.setPenErase(erase);
+        const erase = stylusErasePointers.current.has(event.pointerId) || stylusErasing(event.pointerType, event.button, event.buttons);
+        if (erase && !session.penErase) session.setPenErase(true);
+        else if (!erase && session.penErase && (armed.current || session.gesture?.kind === 'stroke')) session.setPenErase(false);
+        if (session.penErase && session.gesture?.kind !== 'stroke') session.pointerDown(cellAt(event));
         if (armed.current) {
           session.pointerDown(armed.current);
           armed.current = null;
@@ -339,15 +345,18 @@ export function CanvasView({
         onChange();
       }}
       onPointerUp={(event) => {
-        if (event.pointerType === 'pen' && (event.buttons & 1) !== 0) {
-          session.setPenErase(stylusErasing(event.pointerType, event.button, event.buttons));
+        if ((event.button === 2 || event.button === 5) && (event.buttons & 1) !== 0) {
+          stylusErasePointers.current.delete(event.pointerId);
+          session.setPenErase(false);
           onChange();
           return;
         }
+        stylusErasePointers.current.delete(event.pointerId);
         pointers.current.delete(event.pointerId);
         if (pointers.current.size < 2) pinch.current = null;
         if (hands.current) {
           if (pointers.current.size === 0) hands.current = false;
+          stylusErasePointers.current.clear();
           session.penErase = false;
           onChange();
           return;
@@ -398,6 +407,8 @@ export function CanvasView({
         pinch.current = null;
         hands.current = false;
         armed.current = null;
+        const keepErase = session.penErase && session.gesture?.kind === 'stroke';
+        stylusErasePointers.current.clear();
         session.penErase = false;
         pasteDrag.current = null;
         resizeDrag.current = null;
@@ -407,7 +418,8 @@ export function CanvasView({
         axisDrag.current = null;
         setAxisCursor(null);
         setReadout(null);
-        session.cancelGesture();
+        if (keepErase) session.pointerUp();
+        else session.cancelGesture();
         onChange();
       }}
     >

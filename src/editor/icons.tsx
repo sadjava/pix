@@ -33,6 +33,8 @@ export type IconName =
   | 'copy'
   | 'cut'
   | 'paste'
+  | 'flipH'
+  | 'flipV'
   | 'plus'
   | 'minus'
   | 'trash'
@@ -184,6 +186,18 @@ const paths: Record<IconName, ReactNode> = {
       <circle cx="6" cy="7" r="2.5" />
       <circle cx="6" cy="17" r="2.5" />
       <path d="m20 4-9 9M11 11 20 20" />
+    </>
+  ),
+  flipH: (
+    <>
+      <path d="M12 4v16" />
+      <path d="M8 8 4 12l4 4M16 8l4 4-4 4" />
+    </>
+  ),
+  flipV: (
+    <>
+      <path d="M4 12h16" />
+      <path d="M8 8 12 4l4 4M8 16l4 4 4-4" />
     </>
   ),
   paste: (

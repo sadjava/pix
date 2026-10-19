@@ -1,6 +1,7 @@
-import type { CellPatch, ClipboardPayload, PaletteColor, Point } from '../../model/types.ts';
+import type { CellPatch, ClipboardPayload, PaletteColor, Point, SymmetrySettings } from '../../model/types.ts';
 import { inBounds, indexOf } from '../canvas/grid.ts';
 import { findOrAddHex } from '../palette/palette.ts';
+import { symmetryCopies } from '../symmetry/reflect.ts';
 import { inclusiveSize } from '../tools/shapes.ts';
 
 export interface SelectionRect {
@@ -273,7 +274,7 @@ export interface BlitResult {
   clipped: boolean;
 }
 
-/** Paste clipboard at origin. Colors match by HEX. Cells outside the grid are skipped. */
+/** Paste clipboard at origin. Colors match by HEX. Active symmetry stamps the same stitches across the axes. */
 export function blitClipboard(
   cells: Uint16Array,
   gridWidth: number,
@@ -281,28 +282,22 @@ export function blitClipboard(
   palette: PaletteColor[],
   clipboard: ClipboardPayload,
   origin: Point,
+  symmetry: SymmetrySettings,
 ): BlitResult {
   let nextPalette = palette;
   const slotMap = new Map<number, number>();
+  const desired = new Map<number, number>();
   let clipped = false;
-  const patches: CellPatch[] = [];
   for (let y = 0; y < clipboard.height; y++) {
     for (let x = 0; x < clipboard.width; x++) {
       const srcSlot = clipboard.cells[indexOf(clipboard.width, x, y)] ?? 0;
-      const gx = origin.x + x;
-      const gy = origin.y + y;
-      if (!inBounds(gridWidth, gridHeight, gx, gy)) {
-        if (srcSlot !== 0) clipped = true;
-        continue;
-      }
       let destSlot = 0;
       if (srcSlot !== 0) {
         const mapped = slotMap.get(srcSlot);
         if (mapped !== undefined) destSlot = mapped;
         else {
           const color = clipboard.palette[srcSlot - 1];
-          if (!color) destSlot = 0;
-          else {
+          if (color) {
             const added = findOrAddHex(nextPalette, color.hex, color.name);
             nextPalette = added.palette;
             destSlot = added.slot;
@@ -310,13 +305,58 @@ export function blitClipboard(
           slotMap.set(srcSlot, destSlot);
         }
       }
-      const index = indexOf(gridWidth, gx, gy);
-      const before = cells[index] ?? 0;
-      if (before === destSlot) continue;
-      patches.push({ index, before, after: destSlot });
+      for (const dest of symmetryCopies({ x: origin.x + x, y: origin.y + y }, symmetry)) {
+        if (!inBounds(gridWidth, gridHeight, dest.x, dest.y)) {
+          if (srcSlot !== 0) clipped = true;
+          continue;
+        }
+        desired.set(indexOf(gridWidth, dest.x, dest.y), destSlot);
+      }
     }
   }
+  const patches: CellPatch[] = [];
+  for (const [index, destSlot] of desired) {
+    const before = cells[index] ?? 0;
+    if (before === destSlot) continue;
+    patches.push({ index, before, after: destSlot });
+  }
   return { patches, palette: nextPalette, clipped };
+}
+
+/** Mirror the stitches inside the selection. The rectangle stays where it is. */
+export function flipRegion(
+  cells: Uint16Array,
+  gridWidth: number,
+  gridHeight: number,
+  rect: SelectionRect,
+  axis: 'horizontal' | 'vertical',
+): CellPatch[] {
+  const after = new Map<number, number>();
+  for (let y = 0; y < rect.height; y += 1) {
+    for (let x = 0; x < rect.width; x += 1) {
+      const gx = rect.x + x;
+      const gy = rect.y + y;
+      if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
+      after.set(indexOf(gridWidth, gx, gy), 0);
+    }
+  }
+  for (let y = 0; y < rect.height; y += 1) {
+    for (let x = 0; x < rect.width; x += 1) {
+      const sx = rect.x + x;
+      const sy = rect.y + y;
+      const value = inBounds(gridWidth, gridHeight, sx, sy) ? (cells[indexOf(gridWidth, sx, sy)] ?? 0) : 0;
+      const dx = axis === 'horizontal' ? rect.x + rect.width - 1 - x : sx;
+      const dy = axis === 'vertical' ? rect.y + rect.height - 1 - y : sy;
+      if (!inBounds(gridWidth, gridHeight, dx, dy)) continue;
+      after.set(indexOf(gridWidth, dx, dy), value);
+    }
+  }
+  const patches: CellPatch[] = [];
+  for (const [index, value] of after) {
+    const before = cells[index] ?? 0;
+    if (before !== value) patches.push({ index, before, after: value });
+  }
+  return patches;
 }
 
 /**

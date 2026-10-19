@@ -9,6 +9,7 @@ import {
   blitClipboard,
   clearRegion,
   extractRegion,
+  flipRegion,
   moveRegion,
   normalizeSelection,
   resizeSelectionRect,
@@ -459,7 +460,12 @@ export class EditorSession {
     if (!this.clipboard) return;
     this.pasteOrigin = this.selection ? { x: this.selection.x, y: this.selection.y } : { x: 0, y: 0 };
     this.pasteClipped = false;
-    if (this.doc.symmetry.mode !== 'off') this.notice = 'Симметрия не применяется к вставке';
+  }
+
+  flipSelection(axis: 'horizontal' | 'vertical'): void {
+    if (!this.selection) return;
+    const patches = flipRegion(this.doc.cells, this.doc.width, this.doc.height, this.selection, axis);
+    this.applyCommit('flip', patches);
   }
 
   movePaste(dx: number, dy: number): void {
@@ -478,6 +484,7 @@ export class EditorSession {
       this.doc.palette,
       this.clipboard,
       this.pasteOrigin,
+      this.doc.symmetry,
     );
     this.doc = { ...this.doc, palette: result.palette };
     this.pasteClipped = result.clipped;

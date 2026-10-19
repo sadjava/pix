@@ -526,13 +526,48 @@ describe('selection', () => {
       palette: [{ id: 'new', name: 'Новый', hex: '#112233' }],
     };
     editor.beginPaste();
-    expect(editor.notice).toBe('Симметрия не применяется к вставке');
+    expect(editor.notice).toBeNull();
     editor.movePaste(3, 0);
     editor.confirmPaste();
     expect(editor.pasteClipped).toBe(true);
     expect(editor.doc.palette.filter((color) => color.hex === '#112233')).toHaveLength(1);
-    const painted = [...editor.doc.cells].filter((cell) => cell !== 0);
-    expect(painted.length).toBe(1);
+    expect(editor.doc.cells[0]).toBe(2);
+    expect(editor.doc.cells[3]).toBe(2);
+    expect([...editor.doc.cells].filter((cell) => cell !== 0)).toEqual([2, 2]);
+  });
+
+  it('stamps the clipboard across both symmetry axes', () => {
+    const editor = session(8, 8);
+    editor.doc.symmetry = { mode: 'both', axisX2: 4, axisY2: 4, showAxes: true };
+    editor.clipboard = {
+      schemaVersion: 1,
+      width: 1,
+      height: 1,
+      cells: new Uint16Array([1]),
+      palette: editor.doc.palette,
+    };
+    editor.beginPaste();
+    editor.confirmPaste();
+    expect(editor.doc.cells[0]).toBe(1);
+    expect(editor.doc.cells[3]).toBe(1);
+    expect(editor.doc.cells[3 * 8]).toBe(1);
+    expect(editor.doc.cells[3 * 8 + 3]).toBe(1);
+    expect(editor.selection).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+  });
+
+  it('flips the stitches inside the selection in one undo step', () => {
+    const editor = session();
+    const rect = { x: 1, y: 1, width: 3, height: 2 };
+    paint(editor, rect, [1, 2, 3, 4, 5, 6]);
+    editor.selection = { ...rect };
+    editor.flipSelection('horizontal');
+    expect(taken(editor, rect)).toEqual([3, 2, 1, 6, 5, 4]);
+    editor.undo();
+    expect(taken(editor, rect)).toEqual([1, 2, 3, 4, 5, 6]);
+    editor.flipSelection('vertical');
+    expect(taken(editor, rect)).toEqual([4, 5, 6, 1, 2, 3]);
+    expect(editor.selection).toEqual(rect);
+    expect(editor.history.undo).toHaveLength(1);
   });
 });
 

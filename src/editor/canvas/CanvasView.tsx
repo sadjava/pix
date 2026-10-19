@@ -4,6 +4,7 @@ import type { Viewport } from '../../model/types.ts';
 import { renderRgba } from '../../export/png.ts';
 import { ru } from '../../i18n/ru.ts';
 import { axisLabel } from '../symmetry/axisLabel.ts';
+import { symmetryCopies } from '../symmetry/reflect.ts';
 import { Icon } from '../icons.tsx';
 import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, containViewport, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
@@ -688,7 +689,9 @@ function draw(
     for (let y = 0; y < clip.height; y += 1) {
       for (let x = 0; x < clip.width; x += 1) {
         if (clip.cells[y * clip.width + x] === 0) continue;
-        overlayCtx.fillRect(viewport.panX + (session.pasteOrigin.x + x) * cellPx, viewport.panY + (session.pasteOrigin.y + y) * cellPx, cellPx, cellPx);
+        for (const dest of symmetryCopies({ x: session.pasteOrigin.x + x, y: session.pasteOrigin.y + y }, session.doc.symmetry)) {
+          overlayCtx.fillRect(viewport.panX + dest.x * cellPx, viewport.panY + dest.y * cellPx, cellPx, cellPx);
+        }
       }
     }
   }

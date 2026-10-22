@@ -9,8 +9,11 @@ import {
   blitClipboard,
   clearRegion,
   extractRegion,
+  flipBuffer,
   flipRegion,
   moveRegion,
+  rotateBuffer,
+  scaleBuffer,
   normalizeSelection,
   resizeSelectionRect,
   rotateRegion,
@@ -113,6 +116,10 @@ export class EditorSession {
   selection: SelectionRect | null = null;
   clipboard: ClipboardPayload | null = null;
   pasteOrigin: Point | null = null;
+  pasteCells: Uint16Array | null = null;
+  pasteWidth = 0;
+  pasteHeight = 0;
+  pastePalette: PaletteColor[] = [];
   pasteClipped = false;
   revision: number;
   gesture: Gesture | null = null;
@@ -394,6 +401,8 @@ export class EditorSession {
 
   private scaleSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
   private rotateSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
+  /** Cells the live rotate or scale started from. The rug is not touched until confirm. */
+  private pasteBase: { origin: Point; width: number; height: number; cells: Uint16Array } | null = null;
 
   private cancelScale(): void {
     if (!this.scaleSource) return;
@@ -457,12 +466,29 @@ export class EditorSession {
   }
 
   beginPaste(): void {
-    if (!this.clipboard) return;
+    const clip = this.clipboard;
+    if (!clip) return;
     this.pasteOrigin = this.selection ? { x: this.selection.x, y: this.selection.y } : { x: 0, y: 0 };
+    this.pasteCells = clip.cells.slice();
+    this.pasteWidth = clip.width;
+    this.pasteHeight = clip.height;
+    this.pastePalette = clip.palette;
+    this.pasteBase = null;
+    this.rotationDegrees = null;
     this.pasteClipped = false;
   }
 
+  pasteRect(): SelectionRect | null {
+    if (!this.pasteOrigin || !this.pasteCells) return null;
+    return { x: this.pasteOrigin.x, y: this.pasteOrigin.y, width: this.pasteWidth, height: this.pasteHeight };
+  }
+
   flipSelection(axis: 'horizontal' | 'vertical'): void {
+    if (this.pasteOrigin && this.pasteCells) {
+      this.finishPasteEdit();
+      this.pasteCells = flipBuffer(this.pasteCells, this.pasteWidth, this.pasteHeight, axis);
+      return;
+    }
     if (!this.selection) return;
     const patches = flipRegion(this.doc.cells, this.doc.width, this.doc.height, this.selection, axis);
     this.applyCommit('flip', patches);
@@ -470,37 +496,107 @@ export class EditorSession {
 
   movePaste(dx: number, dy: number): void {
     if (!this.pasteOrigin) return;
+    this.finishPasteEdit();
     this.pasteOrigin = { x: this.pasteOrigin.x + dx, y: this.pasteOrigin.y + dy };
   }
 
+  startPasteRotate(): void {
+    if (!this.pasteOrigin || !this.pasteCells) return;
+    this.finishPasteEdit();
+    this.pasteBase = {
+      origin: { x: this.pasteOrigin.x, y: this.pasteOrigin.y },
+      width: this.pasteWidth,
+      height: this.pasteHeight,
+      cells: this.pasteCells.slice(),
+    };
+    this.rotationDegrees = 0;
+  }
+
+  previewPasteRotate(radians: number): void {
+    const base = this.pasteBase;
+    if (!base) return;
+    const turned = rotateBuffer(base.cells, base.width, base.height, radians);
+    this.pasteCells = turned.cells;
+    this.pasteWidth = turned.width;
+    this.pasteHeight = turned.height;
+    this.pasteOrigin = { x: base.origin.x + turned.dx, y: base.origin.y + turned.dy };
+    const degrees = Math.round((radians * 180) / Math.PI);
+    this.rotationDegrees = ((degrees % 360) + 360) % 360;
+  }
+
+  startPasteScale(): void {
+    if (!this.pasteOrigin || !this.pasteCells) return;
+    this.finishPasteEdit();
+    this.pasteBase = {
+      origin: { x: this.pasteOrigin.x, y: this.pasteOrigin.y },
+      width: this.pasteWidth,
+      height: this.pasteHeight,
+      cells: this.pasteCells.slice(),
+    };
+  }
+
+  previewPasteScale(handle: SelectionHandle, cell: Point): void {
+    const base = this.pasteBase;
+    if (!base) return;
+    const dest = resizeSelectionRect(
+      { x: base.origin.x, y: base.origin.y, width: base.width, height: base.height },
+      handle,
+      cell,
+      this.doc.width,
+      this.doc.height,
+    );
+    this.pasteOrigin = { x: dest.x, y: dest.y };
+    this.pasteWidth = dest.width;
+    this.pasteHeight = dest.height;
+    this.pasteCells = scaleBuffer(base.cells, base.width, base.height, dest.width, dest.height);
+  }
+
+  /** Keep the draft as it looks now. Still nothing is written onto the rug. */
+  finishPasteEdit(): void {
+    this.pasteBase = null;
+    this.rotationDegrees = null;
+  }
+
   confirmPaste(): void {
-    if (!this.clipboard || !this.pasteOrigin) return;
+    if (!this.pasteCells || !this.pasteOrigin) return;
+    this.finishPasteEdit();
     const origin = this.pasteOrigin;
-    const clip = this.clipboard;
+    const width = this.pasteWidth;
+    const height = this.pasteHeight;
     const result = blitClipboard(
       this.doc.cells,
       this.doc.width,
       this.doc.height,
       this.doc.palette,
-      this.clipboard,
-      this.pasteOrigin,
+      { schemaVersion: 1, width, height, cells: this.pasteCells, palette: this.pastePalette },
+      origin,
       this.doc.symmetry,
     );
     this.doc = { ...this.doc, palette: result.palette };
     this.pasteClipped = result.clipped;
     if (result.clipped) this.notice = 'Часть выходит за холст';
     this.applyCommit('paste', result.patches);
-    this.pasteOrigin = null;
+    this.clearPaste();
     const x0 = Math.max(0, Math.min(this.doc.width - 1, origin.x));
     const y0 = Math.max(0, Math.min(this.doc.height - 1, origin.y));
-    const x1 = Math.max(x0, Math.min(this.doc.width - 1, origin.x + clip.width - 1));
-    const y1 = Math.max(y0, Math.min(this.doc.height - 1, origin.y + clip.height - 1));
+    const x1 = Math.max(x0, Math.min(this.doc.width - 1, origin.x + width - 1));
+    const y1 = Math.max(y0, Math.min(this.doc.height - 1, origin.y + height - 1));
     this.selection = { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
   }
 
   cancelPaste(): void {
-    this.pasteOrigin = null;
+    this.clearPaste();
     this.pasteClipped = false;
+  }
+
+  private clearPaste(): void {
+    this.pasteOrigin = null;
+    this.pasteCells = null;
+    this.pasteWidth = 0;
+    this.pasteHeight = 0;
+    this.pastePalette = [];
+    this.pasteBase = null;
+    this.rotationDegrees = null;
   }
 
   /** Take a swatch off the list. Stitches that already use the color stay. */

@@ -457,8 +457,8 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           <div className="icon-row">
             <button type="button" className="icon-btn" aria-label={ru.copy} title={ru.copy} disabled={!session.selection} onClick={() => { session.copySelection(); refresh(); }}><Icon name="copy" /></button>
             <button type="button" className="icon-btn" aria-label={ru.paste} title={ru.paste} disabled={!session.clipboard} onClick={() => { session.beginPaste(); refresh(); }}><Icon name="paste" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.flipHorizontal} title={ru.flipHorizontal} disabled={!session.selection} onClick={() => { session.flipSelection('horizontal'); refresh(); }}><Icon name="flipH" /></button>
-            <button type="button" className="icon-btn" aria-label={ru.flipVertical} title={ru.flipVertical} disabled={!session.selection} onClick={() => { session.flipSelection('vertical'); refresh(); }}><Icon name="flipV" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.flipHorizontal} title={ru.flipHorizontal} disabled={!session.selection && !session.pasteOrigin} onClick={() => { session.flipSelection('horizontal'); refresh(); }}><Icon name="flipH" /></button>
+            <button type="button" className="icon-btn" aria-label={ru.flipVertical} title={ru.flipVertical} disabled={!session.selection && !session.pasteOrigin} onClick={() => { session.flipSelection('vertical'); refresh(); }}><Icon name="flipV" /></button>
             <button type="button" className="icon-btn" aria-label={ru.clearSelection} title={ru.clearSelection} disabled={!session.selection} onClick={() => { session.clearSelection(); refresh(); }}><Icon name="trash" /></button>
           </div>
         </section>
@@ -629,7 +629,7 @@ async function backupNow(record: ProjectRecord, session: EditorSession): Promise
   const loaded = await repository.load(record.id);
   if ('doc' in loaded && loaded.record.documentRevision > session.revision && !session.gesture) {
     session.selection = null;
-    session.pasteOrigin = null;
+    session.cancelPaste();
     session.doc = loaded.doc;
     session.history = loaded.history;
     session.revision = loaded.record.documentRevision;

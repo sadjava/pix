@@ -555,6 +555,43 @@ describe('selection', () => {
     expect(editor.selection).toEqual({ x: 0, y: 0, width: 1, height: 1 });
   });
 
+  it('keeps a paste off the rug until it is confirmed', () => {
+    const editor = session();
+    const rect = { x: 0, y: 0, width: 2, height: 2 };
+    paint(editor, rect, [1, 0, 0, 0]);
+    editor.selection = { ...rect };
+    editor.copySelection();
+    const before = editor.doc.cells.slice();
+    editor.beginPaste();
+    editor.movePaste(2, 1);
+    editor.flipSelection('horizontal');
+    expect(editor.doc.cells).toEqual(before);
+    expect([...(editor.clipboard?.cells ?? [])]).toEqual([1, 0, 0, 0]);
+    editor.cancelPaste();
+    expect(editor.pasteOrigin).toBeNull();
+    expect(editor.doc.cells).toEqual(before);
+    editor.beginPaste();
+    editor.startPasteScale();
+    editor.previewPasteScale('e', { x: 3, y: 1 });
+    editor.finishPasteEdit();
+    expect(editor.pasteWidth).toBe(4);
+    expect(editor.doc.cells).toEqual(before);
+    editor.cancelPaste();
+    editor.beginPaste();
+    editor.movePaste(2, 1);
+    editor.flipSelection('horizontal');
+    editor.startPasteRotate();
+    editor.previewPasteRotate(Math.PI / 2);
+    editor.finishPasteEdit();
+    expect(editor.doc.cells).toEqual(before);
+    editor.confirmPaste();
+    expect(taken(editor, { x: 2, y: 1, width: 2, height: 2 })).toEqual([0, 0, 0, 1]);
+    expect(editor.doc.cells[0]).toBe(1);
+    expect(editor.pasteOrigin).toBeNull();
+    expect(editor.history.undo).toHaveLength(1);
+    expect([...(editor.clipboard?.cells ?? [])]).toEqual([1, 0, 0, 0]);
+  });
+
   it('flips the stitches inside the selection in one undo step', () => {
     const editor = session();
     const rect = { x: 1, y: 1, width: 3, height: 2 };

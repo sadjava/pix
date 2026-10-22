@@ -359,6 +359,114 @@ export function flipRegion(
   return patches;
 }
 
+/** Left-right or top-bottom flip of a copied block. The block stays the same size. */
+export function flipBuffer(
+  cells: Uint16Array,
+  width: number,
+  height: number,
+  axis: 'horizontal' | 'vertical',
+): Uint16Array {
+  const out = new Uint16Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const sx = axis === 'horizontal' ? width - 1 - x : x;
+      const sy = axis === 'vertical' ? height - 1 - y : y;
+      out[y * width + x] = cells[sy * width + sx] ?? 0;
+    }
+  }
+  return out;
+}
+
+/** Rotate a copied block around its center. The shift keeps that center put. Nothing is clipped. */
+export function rotateBuffer(
+  cells: Uint16Array,
+  width: number,
+  height: number,
+  radians: number,
+): { cells: Uint16Array; width: number; height: number; dx: number; dy: number } {
+  const source = { x: 0, y: 0, width, height };
+  const turns = quarterTurns(radians);
+  const dest = turns === null ? looseBounds(source, radians) : quarterRect(source, turns);
+  const out = new Uint16Array(dest.width * dest.height);
+  if (turns !== null) {
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const local = turnLocal(x, y, width, height, turns);
+        if (local.x < 0 || local.y < 0 || local.x >= dest.width || local.y >= dest.height) continue;
+        out[local.y * dest.width + local.x] = cells[y * width + x] ?? 0;
+      }
+    }
+  } else {
+    const cx = width / 2;
+    const cy = height / 2;
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    for (let y = 0; y < dest.height; y += 1) {
+      for (let x = 0; x < dest.width; x += 1) {
+        const dx = dest.x + x + 0.5 - cx;
+        const dy = dest.y + y + 0.5 - cy;
+        const sx = cx + dx * cos + dy * sin;
+        const sy = cy - dx * sin + dy * cos;
+        const lx = Math.floor(sx);
+        const ly = Math.floor(sy);
+        if (lx < 0 || ly < 0 || lx >= width || ly >= height) continue;
+        out[y * dest.width + x] = cells[ly * width + lx] ?? 0;
+      }
+    }
+  }
+  return { cells: out, width: dest.width, height: dest.height, dx: dest.x, dy: dest.y };
+}
+
+/** Nearest-neighbor scale of a copied block into a new size. */
+export function scaleBuffer(
+  cells: Uint16Array,
+  width: number,
+  height: number,
+  destWidth: number,
+  destHeight: number,
+): Uint16Array {
+  const out = new Uint16Array(Math.max(0, destWidth) * Math.max(0, destHeight));
+  if (destWidth < 1 || destHeight < 1 || width < 1 || height < 1) return out;
+  for (let y = 0; y < destHeight; y += 1) {
+    for (let x = 0; x < destWidth; x += 1) {
+      const u = Math.min(width - 1, Math.floor(((x + 0.5) * width) / destWidth));
+      const v = Math.min(height - 1, Math.floor(((y + 0.5) * height) / destHeight));
+      out[y * destWidth + x] = cells[v * width + u] ?? 0;
+    }
+  }
+  return out;
+}
+
+function looseBounds(source: SelectionRect, radians: number): SelectionRect {
+  const cx = source.x + source.width / 2;
+  const cy = source.y + source.height / 2;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const corners = [
+    [source.x, source.y],
+    [source.x + source.width, source.y],
+    [source.x + source.width, source.y + source.height],
+    [source.x, source.y + source.height],
+  ];
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [px, py] of corners) {
+    const dx = (px ?? 0) - cx;
+    const dy = (py ?? 0) - cy;
+    const rx = cx + dx * cos - dy * sin;
+    const ry = cy + dx * sin + dy * cos;
+    minX = Math.min(minX, rx);
+    minY = Math.min(minY, ry);
+    maxX = Math.max(maxX, rx);
+    maxY = Math.max(maxY, ry);
+  }
+  const x = Math.floor(minX);
+  const y = Math.floor(minY);
+  return { x, y, width: Math.max(1, Math.ceil(maxX) - x), height: Math.max(1, Math.ceil(maxY) - y) };
+}
+
 /**
  * Move a region by (dx, dy) as one patch list against the original cells.
  * Overlap uses the original value as `before`.

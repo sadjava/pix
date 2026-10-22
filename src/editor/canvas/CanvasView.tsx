@@ -296,6 +296,17 @@ export function CanvasView({
           return;
         }
         if (session.pasteOrigin) {
+          if (rotateHandleAt(session, event.clientX, event.clientY, event.currentTarget)) {
+            session.startPasteRotate();
+            rotateDrag.current = true;
+            return;
+          }
+          const handle = selectionHandleAt(session, event.clientX, event.clientY, event.currentTarget);
+          if (handle) {
+            session.startPasteScale();
+            resizeDrag.current = handle;
+            return;
+          }
           pasteDrag.current = cellAt(event);
           return;
         }
@@ -380,13 +391,18 @@ export function CanvasView({
           return;
         }
         if (rotateDrag.current) {
-          session.previewRotate(snapRotation(rotationAt(session, event.clientX, event.clientY, event.currentTarget)));
+          const radians = snapRotation(rotationAt(session, event.clientX, event.clientY, event.currentTarget));
+          if (session.pasteOrigin) session.previewPasteRotate(radians);
+          else session.previewRotate(radians);
           onChange();
           return;
         }
         if (resizeDrag.current) {
           const cell = cellAt(event);
-          if (cell) session.previewScale(resizeDrag.current, cell);
+          if (cell) {
+            if (session.pasteOrigin) session.previewPasteScale(resizeDrag.current, cell);
+            else session.previewScale(resizeDrag.current, cell);
+          }
           onChange();
           return;
         }
@@ -451,10 +467,12 @@ export function CanvasView({
           return;
         }
         if (resizeDrag.current || rotateDrag.current) {
+          const pasting = session.pasteOrigin !== null;
           const rotating = rotateDrag.current;
           resizeDrag.current = null;
           rotateDrag.current = false;
-          if (rotating) session.commitRotate();
+          if (pasting) session.finishPasteEdit();
+          else if (rotating) session.commitRotate();
           else session.commitScale();
           onChange();
           return;
@@ -466,7 +484,6 @@ export function CanvasView({
         }
         if (pasteDrag.current) {
           pasteDrag.current = null;
-          session.confirmPaste();
           onChange();
           return;
         }
@@ -487,6 +504,7 @@ export function CanvasView({
         pinch.current = null;
         hands.current = false;
         armed.current = null;
+        const editingPaste = session.pasteOrigin !== null && (resizeDrag.current !== null || rotateDrag.current);
         const keepErase = session.penErase && session.gesture?.kind === 'stroke';
         stylusErasePointers.current.clear();
         session.penErase = false;
@@ -498,6 +516,7 @@ export function CanvasView({
         axisDrag.current = null;
         setAxisCursor(null);
         setReadout(null);
+        if (editingPaste) session.finishPasteEdit();
         if (keepErase) session.pointerUp();
         else session.cancelGesture();
         onChange();
@@ -571,6 +590,14 @@ export function CanvasView({
           </button>
         </div>
       </div>
+      {session.pasteOrigin ? (
+        <div className="paste-bar" onPointerDown={(event) => event.stopPropagation()}>
+          <button type="button" className="icon-btn" aria-label={ru.flipHorizontal} title={ru.flipHorizontal} onClick={() => { session.flipSelection('horizontal'); onChange(); }}><Icon name="flipH" /></button>
+          <button type="button" className="icon-btn" aria-label={ru.flipVertical} title={ru.flipVertical} onClick={() => { session.flipSelection('vertical'); onChange(); }}><Icon name="flipV" /></button>
+          <button type="button" className="icon-btn" aria-label={ru.pasteConfirm} title={ru.pasteConfirm} onClick={() => { session.confirmPaste(); onChange(); }}><Icon name="check" /></button>
+          <button type="button" className="icon-btn" aria-label={ru.cancel} title={ru.cancel} onClick={() => { session.cancelPaste(); onChange(); }}><Icon name="x" /></button>
+        </div>
+      ) : null}
       {readout ? <p className="axis-readout">{readout}</p> : null}
       {live ? <p className="selection-readout">{selectionSizeLabel(live)}</p> : null}
       <div className="canvas-chrome" onPointerDown={(event) => event.stopPropagation()}>
@@ -679,21 +706,23 @@ function draw(
       overlayCtx.fillRect(viewport.panX + point.x * cellPx, viewport.panY + point.y * cellPx, cellPx, cellPx);
     }
   }
-  if (session.selection) {
-    strokeRect(overlayCtx, session.selection, viewport, '#243e66');
-    if (session.tool === 'select' && session.selection) drawHandles(overlayCtx, session.selection, viewport, session.rotationDegrees);
-  }
-  if (session.pasteOrigin && session.clipboard) {
-    const clip = session.clipboard;
-    overlayCtx.fillStyle = 'rgba(180, 51, 74, 0.45)';
-    for (let y = 0; y < clip.height; y += 1) {
-      for (let x = 0; x < clip.width; x += 1) {
-        if (clip.cells[y * clip.width + x] === 0) continue;
-        for (const dest of symmetryCopies({ x: session.pasteOrigin.x + x, y: session.pasteOrigin.y + y }, session.doc.symmetry)) {
+  const paste = session.pasteRect();
+  if (paste && session.pasteCells) {
+    for (let y = 0; y < paste.height; y += 1) {
+      for (let x = 0; x < paste.width; x += 1) {
+        const slot = session.pasteCells[y * paste.width + x] ?? 0;
+        if (slot === 0) continue;
+        overlayCtx.fillStyle = session.pastePalette[slot - 1]?.hex ?? '#1a1614';
+        for (const dest of symmetryCopies({ x: paste.x + x, y: paste.y + y }, session.doc.symmetry)) {
           overlayCtx.fillRect(viewport.panX + dest.x * cellPx, viewport.panY + dest.y * cellPx, cellPx, cellPx);
         }
       }
     }
+    strokeRect(overlayCtx, paste, viewport, '#243e66');
+    drawHandles(overlayCtx, paste, viewport, session.rotationDegrees);
+  } else if (session.selection) {
+    strokeRect(overlayCtx, session.selection, viewport, '#243e66');
+    if (session.tool === 'select' && session.selection) drawHandles(overlayCtx, session.selection, viewport, session.rotationDegrees);
   }
   drawAxes(overlayCtx, session, viewport, dragging);
   if (session.tool === 'trace') {
@@ -760,8 +789,12 @@ function pointerIn(wrap: HTMLElement, clientX: number, clientY: number): { x: nu
   return { x: clientX - box.left, y: clientY - box.top };
 }
 
+function gestureRect(session: EditorSession): SelectionRect | null {
+  return session.pasteRect() ?? session.selection;
+}
+
 function rotationAt(session: EditorSession, clientX: number, clientY: number, wrap: HTMLElement): number {
-  const rect = session.selection;
+  const rect = gestureRect(session);
   if (!rect) return 0;
   const point = pointerIn(wrap, clientX, clientY);
   const cellPx = session.doc.viewport.cellSize * session.doc.viewport.scale;
@@ -773,7 +806,7 @@ function rotationAt(session: EditorSession, clientX: number, clientY: number, wr
 }
 
 function rotateHandleAt(session: EditorSession, clientX: number, clientY: number, wrap: HTMLElement): boolean {
-  const rect = session.selection;
+  const rect = gestureRect(session);
   if (!rect || wrap.getBoundingClientRect().width <= 0) return false;
   const point = pointerIn(wrap, clientX, clientY);
   const knob = rotateKnob(rect, session.doc.viewport);
@@ -825,7 +858,7 @@ function selectionHandleAt(
   clientY: number,
   wrap: HTMLElement,
 ): SelectionHandle | null {
-  const area = session.selection;
+  const area = gestureRect(session);
   const box = wrap.getBoundingClientRect();
   if (!area || box.width <= 0 || box.height <= 0) return null;
   const x = clientX - box.left;

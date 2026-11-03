@@ -2,46 +2,63 @@ import { inBounds, indexOf } from '../canvas/grid.ts';
 
 /**
  * Iterative 4-connected flood fill.
- * ponytail: one seen-array the size of the grid; fine through 500×500, switch to a tiled queue if larger canvases become common.
+ * Single seen-array and index queue without per-cell object allocations.
  */
 export function floodIndices(cells: Uint16Array, width: number, height: number, x: number, y: number): number[] {
   if (!inBounds(width, height, x, y)) return [];
   const start = indexOf(width, x, y);
   const target = cells[start] ?? 0;
-  const seen = new Uint8Array(cells.length);
-  const qx = new Int32Array(cells.length);
-  const qy = new Int32Array(cells.length);
+  const total = cells.length;
+  const seen = new Uint8Array(total);
+  const queue = new Int32Array(total);
   let head = 0;
   let tail = 0;
-  qx[tail] = x;
-  qy[tail] = y;
-  tail += 1;
+
+  queue[tail++] = start;
   seen[start] = 1;
-  const out: number[] = [];
+
   while (head < tail) {
-    const cx = qx[head] ?? 0;
-    const cy = qy[head] ?? 0;
-    head += 1;
-    const index = indexOf(width, cx, cy);
-    if ((cells[index] ?? 0) !== target) continue;
-    out.push(index);
-    const neighbors = [
-      [cx + 1, cy],
-      [cx - 1, cy],
-      [cx, cy + 1],
-      [cx, cy - 1],
-    ];
-    for (const pair of neighbors) {
-      const nx = pair[0] ?? 0;
-      const ny = pair[1] ?? 0;
-      if (!inBounds(width, height, nx, ny)) continue;
-      const next = indexOf(width, nx, ny);
-      if (seen[next] || (cells[next] ?? 0) !== target) continue;
-      seen[next] = 1;
-      qx[tail] = nx;
-      qy[tail] = ny;
-      tail += 1;
+    const index = queue[head++]!;
+    const cx = index % width;
+    const cy = Math.floor(index / width);
+
+    // Right: cx + 1, cy
+    if (cx + 1 < width) {
+      const next = index + 1;
+      if (!seen[next] && (cells[next] ?? 0) === target) {
+        seen[next] = 1;
+        queue[tail++] = next;
+      }
     }
+    // Left: cx - 1, cy
+    if (cx > 0) {
+      const next = index - 1;
+      if (!seen[next] && (cells[next] ?? 0) === target) {
+        seen[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    // Down: cx, cy + 1
+    if (cy + 1 < height) {
+      const next = index + width;
+      if (!seen[next] && (cells[next] ?? 0) === target) {
+        seen[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+    // Up: cx, cy - 1
+    if (cy > 0) {
+      const next = index - width;
+      if (!seen[next] && (cells[next] ?? 0) === target) {
+        seen[next] = 1;
+        queue[tail++] = next;
+      }
+    }
+  }
+
+  const out: number[] = new Array(tail);
+  for (let i = 0; i < tail; i++) {
+    out[i] = queue[i]!;
   }
   return out;
 }

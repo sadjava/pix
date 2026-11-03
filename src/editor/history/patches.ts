@@ -1,6 +1,7 @@
 import { HISTORY_LIMIT, type CellPatch, type HistoryEntry, type PackedPatches, type PaletteColor } from '../../model/types.ts';
 
-const BYTE_LIMIT = 400_000;
+const BYTE_LIMIT = 50_000_000;
+const MIN_HISTORY = 10;
 
 export interface HistoryStacks {
   undo: HistoryEntry[];
@@ -77,7 +78,7 @@ export function redoHistory(
 
 function trim(undo: HistoryEntry[]): HistoryEntry[] {
   let next = undo.slice(-HISTORY_LIMIT);
-  while (next.length > 1 && byteSize(next) > BYTE_LIMIT) next = next.slice(1);
+  while (next.length > MIN_HISTORY && byteSize(next) > BYTE_LIMIT) next = next.slice(1);
   return next;
 }
 

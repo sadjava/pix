@@ -1,5 +1,5 @@
 import { CHECKPOINT_MS, type CellPatch, type ClipboardPayload, type HistoryEntry, type PaletteColor, type Point, type ProjectDocument, type ToolId } from '../model/types.ts';
-import { cloneCells, getCell, inBounds } from './canvas/grid.ts';
+import { cloneCells, getCell, inBounds, indexOf } from './canvas/grid.ts';
 import { applyPatches, patchesForValues } from './tools/stroke.ts';
 import { floodIndices } from './tools/fill.ts';
 import { circleCells, diamondCells, lineCells, radiusOf, rectOutline } from './tools/shapes.ts';
@@ -794,6 +794,8 @@ export class EditorSession {
     const seeds = reflectPoints([seed], this.doc.symmetry, this.doc.width, this.doc.height);
     const indexes = new Set<number>();
     for (const point of seeds) {
+      const startIdx = indexOf(this.doc.width, point.x, point.y);
+      if (indexes.has(startIdx)) continue;
       for (const index of floodIndices(this.doc.cells, this.doc.width, this.doc.height, point.x, point.y)) {
         indexes.add(index);
       }

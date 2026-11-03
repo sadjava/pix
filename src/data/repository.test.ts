@@ -26,6 +26,57 @@ async function paintAndSave(repo: ProjectRepository, id: string, x: number): Pro
 }
 
 describe('local projects', () => {
+  it('restores large fill history from indexedDB', async () => {
+    const repo = ProjectRepository.open('large-fill');
+    const created = await repo.create({ name: 'Большой', width: 400, height: 400 });
+    const loaded = await repo.load(created.record.id);
+    if (!('doc' in loaded)) throw new Error('load');
+    const editor = new EditorSession(loaded.doc, loaded.history, loaded.record.documentRevision);
+    let pending: Promise<unknown> = Promise.resolve();
+    editor.onPersist = (payload) => {
+      pending = repo.commit(created.record.id, payload);
+    };
+
+    // Draw 3 strokes
+    editor.setTool('pencil');
+    editor.colorSlot = 2;
+    for (let i = 0; i < 3; i++) {
+      editor.pointerDown({ x: i, y: 0 });
+      editor.pointerUp();
+      await pending;
+    }
+    expect(editor.history.undo).toHaveLength(3);
+
+    // Accidental large fill
+    editor.setTool('fill');
+    editor.colorSlot = 1;
+    editor.pointerDown({ x: 10, y: 10 });
+    await pending;
+
+    expect(editor.history.undo).toHaveLength(4);
+
+    // Reload from indexedDB and verify full history is preserved
+    const after = await repo.load(created.record.id);
+    if (!('history' in after)) throw new Error('after load');
+    expect(after.history.undo).toHaveLength(4);
+
+    const reloadedEditor = new EditorSession(after.doc, after.history, after.record.documentRevision);
+    reloadedEditor.undo(); // Undo fill
+    expect(reloadedEditor.doc.cells[10]).toBe(0);
+    expect(reloadedEditor.doc.cells[0]).toBe(2);
+    expect(reloadedEditor.doc.cells[1]).toBe(2);
+    expect(reloadedEditor.doc.cells[2]).toBe(2);
+
+    reloadedEditor.undo(); // Undo 3rd stroke
+    expect(reloadedEditor.doc.cells[2]).toBe(0);
+    reloadedEditor.undo(); // Undo 2nd stroke
+    expect(reloadedEditor.doc.cells[1]).toBe(0);
+    reloadedEditor.undo(); // Undo 1st stroke
+    expect(reloadedEditor.doc.cells[0]).toBe(0);
+
+    repo.close();
+  });
+
   it('restores three projects after reopen without calling the network', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const repo = ProjectRepository.open('rugs');

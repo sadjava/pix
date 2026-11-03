@@ -207,6 +207,63 @@ describe('pencil, eraser, fill, picker', () => {
     expect(editor.doc.cells[10]).toBe(1);
   });
 
+  it('preserves history and undoes a huge fill even after subsequent strokes', () => {
+    const editor = session(500, 500);
+
+    // 1. Draw 3 initial strokes
+    editor.setTool('pencil');
+    editor.setColorSlot(2);
+    for (let i = 0; i < 3; i++) {
+      editor.pointerDown({ x: i, y: 0 });
+      editor.pointerUp();
+    }
+    expect(editor.history.undo).toHaveLength(3);
+    expect(editor.doc.cells[0]).toBe(2);
+    expect(editor.doc.cells[1]).toBe(2);
+    expect(editor.doc.cells[2]).toBe(2);
+
+    // 2. Accidental huge fill on the background (250,000 cells minus 3 cells)
+    editor.setColorSlot(1);
+    editor.setTool('fill');
+    editor.pointerDown({ x: 10, y: 10 });
+    expect(editor.history.undo).toHaveLength(4);
+    expect(editor.doc.cells[10]).toBe(1);
+    expect(editor.doc.cells[500 * 500 - 1]).toBe(1);
+
+    // 3. User accidentally taps/draws another stroke after the fill
+    editor.setTool('pencil');
+    editor.setColorSlot(2);
+    editor.pointerDown({ x: 100, y: 100 });
+    editor.pointerUp();
+    expect(editor.history.undo).toHaveLength(5);
+    expect(editor.doc.cells[100 * 500 + 100]).toBe(2);
+
+    // 4. Undo the accidental tap
+    editor.undo();
+    expect(editor.history.undo).toHaveLength(4);
+    expect(editor.doc.cells[100 * 500 + 100]).toBe(1);
+
+    // 5. Undo the accidental huge fill
+    editor.undo();
+    expect(editor.history.undo).toHaveLength(3);
+    expect(editor.doc.cells[10]).toBe(0);
+    expect(editor.doc.cells[500 * 500 - 1]).toBe(0);
+    expect(editor.doc.cells[0]).toBe(2);
+    expect(editor.doc.cells[1]).toBe(2);
+    expect(editor.doc.cells[2]).toBe(2);
+
+    // 6. User can continue undoing initial strokes
+    editor.undo();
+    expect(editor.doc.cells[2]).toBe(0);
+    expect(editor.doc.cells[1]).toBe(2);
+    editor.undo();
+    expect(editor.doc.cells[1]).toBe(0);
+    expect(editor.doc.cells[0]).toBe(2);
+    editor.undo();
+    expect(editor.doc.cells[0]).toBe(0);
+    expect(editor.history.undo).toHaveLength(0);
+  });
+
   it('keeps the previous color and swaps back to it', () => {
     const editor = session();
     editor.setColorSlot(1);

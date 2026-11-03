@@ -29,6 +29,7 @@ const tools: { id: ToolId; label: string; icon: IconName }[] = [
   { id: 'rect', label: ru.rect, icon: 'rect' },
   { id: 'diamond', label: ru.diamond, icon: 'diamond' },
   { id: 'select', label: ru.select, icon: 'select' },
+  { id: 'lasso', label: ru.lasso, icon: 'lasso' },
   { id: 'pan', label: ru.pan, icon: 'pan' },
   { id: 'trace', label: ru.trace, icon: 'image' },
 ];
@@ -451,6 +452,38 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           </p>
         </section>
         <section className="group" aria-label={ru.selection}>
+          <div className="icon-row">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={ru.select}
+              title={ru.select}
+              aria-pressed={session.tool === 'select'}
+              onClick={() => { session.setTool('select'); refresh(); }}
+            >
+              <Icon name="select" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={ru.lasso}
+              title={ru.lasso}
+              aria-pressed={session.tool === 'lasso'}
+              onClick={() => { session.setTool('lasso'); refresh(); }}
+            >
+              <Icon name="lasso" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={ru.deselect}
+              title={ru.deselect}
+              disabled={!session.selection}
+              onClick={() => { session.deselect(); refresh(); }}
+            >
+              <Icon name="x" />
+            </button>
+          </div>
           {rectSize ? <p className="note">{selectionSizeLabel(rectSize)}</p> : live ? <p className="note">{selectionSizeLabel(live)}</p> : null}
           {session.notice ? <p className="note">{session.notice}</p> : null}
           {session.pasteClipped ? <p className="note">{ru.clipped}</p> : null}

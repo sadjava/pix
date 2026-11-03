@@ -128,6 +128,7 @@ export type ToolId =
   | 'rect'
   | 'diamond'
   | 'select'
+  | 'lasso'
   | 'pan'
   | 'trace';
 
@@ -137,4 +138,5 @@ export interface ClipboardPayload {
   height: number;
   cells: Uint16Array;
   palette: PaletteColor[];
+  mask?: Uint8Array;
 }

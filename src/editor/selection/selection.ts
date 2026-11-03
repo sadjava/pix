@@ -2,13 +2,17 @@ import type { CellPatch, ClipboardPayload, PaletteColor, Point, SymmetrySettings
 import { inBounds, indexOf } from '../canvas/grid.ts';
 import { findOrAddHex } from '../palette/palette.ts';
 import { symmetryCopies } from '../symmetry/reflect.ts';
-import { inclusiveSize } from '../tools/shapes.ts';
+import { inclusiveSize, lineCells } from '../tools/shapes.ts';
 
 export interface SelectionRect {
   x: number;
   y: number;
   width: number;
   height: number;
+  /** Binary mask where 1 indicates the cell is selected, 0 otherwise. Length is width * height. */
+  mask?: Uint8Array;
+  /** Polygon vertices forming the boundary. */
+  polygon?: Point[];
 }
 
 export type SelectionHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
@@ -68,6 +72,7 @@ export function rotateRegion(
   const after = new Map<number, number>();
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
+      if (source.mask && !source.mask[y * source.width + x]) continue;
       const gx = source.x + x;
       const gy = source.y + y;
       if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
@@ -77,6 +82,7 @@ export function rotateRegion(
   if (turns !== null) {
     for (let y = 0; y < source.height; y += 1) {
       for (let x = 0; x < source.width; x += 1) {
+        if (source.mask && !source.mask[y * source.width + x]) continue;
         const local = turnLocal(x, y, source.width, source.height, turns);
         const gx = dest.x + local.x;
         const gy = dest.y + local.y;
@@ -98,6 +104,7 @@ export function rotateRegion(
         const lx = Math.floor(sx - source.x);
         const ly = Math.floor(sy - source.y);
         if (lx < 0 || ly < 0 || lx >= source.width || ly >= source.height) continue;
+        if (source.mask && !source.mask[ly * source.width + lx]) continue;
         if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
         after.set(indexOf(gridWidth, gx, gy), sourceCells[ly * source.width + lx] ?? 0);
       }
@@ -198,6 +205,7 @@ export function scaleRegion(
   const after = new Map<number, number>();
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
+      if (source.mask && !source.mask[y * source.width + x]) continue;
       const gx = source.x + x;
       const gy = source.y + y;
       if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
@@ -211,6 +219,7 @@ export function scaleRegion(
       if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
       const u = Math.min(source.width - 1, Math.floor(((x + 0.5) * source.width) / dest.width));
       const v = Math.min(source.height - 1, Math.floor(((y + 0.5) * source.height) / dest.height));
+      if (source.mask && !source.mask[v * source.width + u]) continue;
       after.set(indexOf(gridWidth, gx, gy), sourceCells[v * source.width + u] ?? 0);
     }
   }
@@ -237,6 +246,10 @@ export function extractRegion(
   const out = new Uint16Array(rect.width * rect.height);
   for (let y = 0; y < rect.height; y++) {
     for (let x = 0; x < rect.width; x++) {
+      if (rect.mask && !rect.mask[y * rect.width + x]) {
+        out[indexOf(rect.width, x, y)] = 0;
+        continue;
+      }
       const gx = rect.x + x;
       const gy = rect.y + y;
       out[indexOf(rect.width, x, y)] = inBounds(gridWidth, gridHeight, gx, gy)
@@ -244,7 +257,14 @@ export function extractRegion(
         : 0;
     }
   }
-  return { schemaVersion: 1, width: rect.width, height: rect.height, cells: out, palette };
+  return {
+    schemaVersion: 1,
+    width: rect.width,
+    height: rect.height,
+    cells: out,
+    palette,
+    mask: rect.mask ? rect.mask.slice() : undefined,
+  };
 }
 
 export function clearRegion(
@@ -256,6 +276,7 @@ export function clearRegion(
   const patches: CellPatch[] = [];
   for (let y = 0; y < rect.height; y++) {
     for (let x = 0; x < rect.width; x++) {
+      if (rect.mask && !rect.mask[y * rect.width + x]) continue;
       const gx = rect.x + x;
       const gy = rect.y + y;
       if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
@@ -290,6 +311,9 @@ export function blitClipboard(
   let clipped = false;
   for (let y = 0; y < clipboard.height; y++) {
     for (let x = 0; x < clipboard.width; x++) {
+      if (clipboard.mask && !clipboard.mask[indexOf(clipboard.width, x, y)]) {
+        continue;
+      }
       const srcSlot = clipboard.cells[indexOf(clipboard.width, x, y)] ?? 0;
       let destSlot = 0;
       if (srcSlot !== 0) {
@@ -334,6 +358,7 @@ export function flipRegion(
   const after = new Map<number, number>();
   for (let y = 0; y < rect.height; y += 1) {
     for (let x = 0; x < rect.width; x += 1) {
+      if (rect.mask && !rect.mask[y * rect.width + x]) continue;
       const gx = rect.x + x;
       const gy = rect.y + y;
       if (!inBounds(gridWidth, gridHeight, gx, gy)) continue;
@@ -342,6 +367,7 @@ export function flipRegion(
   }
   for (let y = 0; y < rect.height; y += 1) {
     for (let x = 0; x < rect.width; x += 1) {
+      if (rect.mask && !rect.mask[y * rect.width + x]) continue;
       const sx = rect.x + x;
       const sy = rect.y + y;
       const value = inBounds(gridWidth, gridHeight, sx, sy) ? (cells[indexOf(gridWidth, sx, sy)] ?? 0) : 0;
@@ -484,6 +510,7 @@ export function moveRegion(
   let clipped = false;
   for (let y = 0; y < rect.height; y++) {
     for (let x = 0; x < rect.width; x++) {
+      if (rect.mask && !rect.mask[y * rect.width + x]) continue;
       const sx = rect.x + x;
       const sy = rect.y + y;
       if (!inBounds(gridWidth, gridHeight, sx, sy)) continue;
@@ -500,6 +527,7 @@ export function moveRegion(
   const cleared = new Set<number>();
   for (let y = 0; y < rect.height; y++) {
     for (let x = 0; x < rect.width; x++) {
+      if (rect.mask && !rect.mask[y * rect.width + x]) continue;
       const sx = rect.x + x;
       const sy = rect.y + y;
       if (!inBounds(gridWidth, gridHeight, sx, sy)) continue;
@@ -516,6 +544,288 @@ export function moveRegion(
   return {
     patches,
     clipped,
-    rect: { x: rect.x + dx, y: rect.y + dy, width: rect.width, height: rect.height },
+    rect: {
+      x: rect.x + dx,
+      y: rect.y + dy,
+      width: rect.width,
+      height: rect.height,
+      mask: rect.mask,
+      polygon: rect.polygon ? rect.polygon.map((p) => ({ x: p.x + dx, y: p.y + dy })) : undefined,
+    },
   };
+}
+
+/** Check whether a point is inside a selection, respecting an arbitrary mask if present. */
+export function insideSelection(rect: SelectionRect, point: Point): boolean {
+  if (point.x < rect.x || point.y < rect.y || point.x >= rect.x + rect.width || point.y >= rect.y + rect.height) {
+    return false;
+  }
+  if (!rect.mask) return true;
+  const lx = point.x - rect.x;
+  const ly = point.y - rect.y;
+  return Boolean(rect.mask[ly * rect.width + lx]);
+}
+
+/** Collect all selected cell indices (y * gridWidth + x) on the canvas. */
+export function getSelectionCellSet(
+  selection: SelectionRect | null,
+  gridWidth: number,
+  gridHeight: number,
+): Set<number> {
+  const set = new Set<number>();
+  if (!selection) return set;
+  for (let y = 0; y < selection.height; y++) {
+    for (let x = 0; x < selection.width; x++) {
+      if (selection.mask && !selection.mask[y * selection.width + x]) continue;
+      const gx = selection.x + x;
+      const gy = selection.y + y;
+      if (inBounds(gridWidth, gridHeight, gx, gy)) {
+        set.add(gy * gridWidth + gx);
+      }
+    }
+  }
+  return set;
+}
+
+/** Construct a minimal bounding box SelectionRect with a tight mask from selected cell indices. */
+export function selectionFromCellSet(
+  indices: Set<number>,
+  gridWidth: number,
+): SelectionRect | null {
+  if (indices.size === 0) return null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const index of indices) {
+    const x = index % gridWidth;
+    const y = Math.floor(index / gridWidth);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const mask = new Uint8Array(width * height);
+  for (const index of indices) {
+    const x = index % gridWidth;
+    const y = Math.floor(index / gridWidth);
+    mask[(y - minY) * width + (x - minX)] = 1;
+  }
+  return { x: minX, y: minY, width, height, mask };
+}
+
+/** Compute the bounding box of a list of points. */
+export function boundingBoxOf(points: readonly Point[]): SelectionRect {
+  if (points.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const pt of points) {
+    if (pt.x < minX) minX = pt.x;
+    if (pt.x > maxX) maxX = pt.x;
+    if (pt.y < minY) minY = pt.y;
+    if (pt.y > maxY) maxY = pt.y;
+  }
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+/** Mirror a binary mask horizontally or vertically. */
+export function flipMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  axis: 'horizontal' | 'vertical',
+): Uint8Array {
+  const out = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const sx = axis === 'horizontal' ? width - 1 - x : x;
+      const sy = axis === 'vertical' ? height - 1 - y : y;
+      out[y * width + x] = mask[sy * width + sx] ?? 0;
+    }
+  }
+  return out;
+}
+
+/** Nearest-neighbor scale of a binary mask. */
+export function scaleMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  destWidth: number,
+  destHeight: number,
+): Uint8Array {
+  const out = new Uint8Array(Math.max(0, destWidth) * Math.max(0, destHeight));
+  if (destWidth < 1 || destHeight < 1 || width < 1 || height < 1) return out;
+  for (let y = 0; y < destHeight; y += 1) {
+    for (let x = 0; x < destWidth; x += 1) {
+      const u = Math.min(width - 1, Math.floor(((x + 0.5) * width) / destWidth));
+      const v = Math.min(height - 1, Math.floor(((y + 0.5) * height) / destHeight));
+      out[y * destWidth + x] = mask[v * width + u] ?? 0;
+    }
+  }
+  return out;
+}
+
+/** Rotate a binary mask around its center, matching rotateBuffer geometry. */
+export function rotateMask(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  radians: number,
+): { mask: Uint8Array; width: number; height: number; dx: number; dy: number } {
+  const u16 = new Uint16Array(mask);
+  const turned = rotateBuffer(u16, width, height, radians);
+  return {
+    mask: new Uint8Array(turned.cells),
+    width: turned.width,
+    height: turned.height,
+    dx: turned.dx,
+    dy: turned.dy,
+  };
+}
+
+/**
+ * Given a sequence of points forming a boundary, connect them with straight lines
+ * (including closing back to the start) and fill the enclosed shape on the pixel grid.
+ */
+export function fillLasso(polygon: readonly Point[]): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  mask: Uint8Array;
+  points: Point[];
+} {
+  if (polygon.length === 0) {
+    return { x: 0, y: 0, width: 0, height: 0, mask: new Uint8Array(0), points: [] };
+  }
+  const boundary: Point[] = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const next = (i + 1) % polygon.length;
+    const from = polygon[i]!;
+    const to = polygon[next]!;
+    const seg = lineCells(from, to);
+    for (const pt of seg) boundary.push(pt);
+  }
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const pt of boundary) {
+    if (pt.x < minX) minX = pt.x;
+    if (pt.x > maxX) maxX = pt.x;
+    if (pt.y < minY) minY = pt.y;
+    if (pt.y > maxY) maxY = pt.y;
+  }
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+
+  const expW = width + 2;
+  const expH = height + 2;
+  const grid = new Uint8Array(expW * expH);
+
+  for (const pt of boundary) {
+    const lx = pt.x - minX + 1;
+    const ly = pt.y - minY + 1;
+    grid[ly * expW + lx] = 1;
+  }
+
+  // 4-connected flood fill from the outer margin (0, 0)
+  const qx = new Int32Array(expW * expH);
+  const qy = new Int32Array(expW * expH);
+  let head = 0;
+  let tail = 0;
+  qx[tail] = 0;
+  qy[tail] = 0;
+  tail++;
+  grid[0] = 2;
+
+  while (head < tail) {
+    const cx = qx[head]!;
+    const cy = qy[head]!;
+    head++;
+    const neighbors = [
+      [cx + 1, cy],
+      [cx - 1, cy],
+      [cx, cy + 1],
+      [cx, cy - 1],
+    ];
+    for (const [nx, ny] of neighbors) {
+      if (nx! >= 0 && nx! < expW && ny! >= 0 && ny! < expH) {
+        const idx = ny! * expW + nx!;
+        if (grid[idx] === 0) {
+          grid[idx] = 2;
+          qx[tail] = nx!;
+          qy[tail] = ny!;
+          tail++;
+        }
+      }
+    }
+  }
+
+  const mask = new Uint8Array(width * height);
+  const points: Point[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const expIdx = (y + 1) * expW + (x + 1);
+      if (grid[expIdx] !== 2) {
+        mask[y * width + x] = 1;
+        points.push({ x: minX + x, y: minY + y });
+      }
+    }
+  }
+
+  return { x: minX, y: minY, width, height, mask, points };
+}
+
+/** Draw the pixel-accurate boundary contour of a masked selection. */
+export function drawMaskOutline(
+  ctx: CanvasRenderingContext2D,
+  rect: SelectionRect,
+  cellPx: number,
+  panX: number,
+  panY: number,
+  color: string,
+): void {
+  const left = panX + rect.x * cellPx;
+  const top = panY + rect.y * cellPx;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const mask = rect.mask;
+  if (!mask) {
+    ctx.strokeRect(left, top, rect.width * cellPx, rect.height * cellPx);
+    return;
+  }
+  for (let y = 0; y < rect.height; y++) {
+    for (let x = 0; x < rect.width; x++) {
+      if (!mask[y * rect.width + x]) continue;
+      const x0 = left + x * cellPx;
+      const y0 = top + y * cellPx;
+      const x1 = x0 + cellPx;
+      const y1 = y0 + cellPx;
+      if (y === 0 || !mask[(y - 1) * rect.width + x]) {
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y0);
+      }
+      if (y === rect.height - 1 || !mask[(y + 1) * rect.width + x]) {
+        ctx.moveTo(x0, y1);
+        ctx.lineTo(x1, y1);
+      }
+      if (x === 0 || !mask[y * rect.width + (x - 1)]) {
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x0, y1);
+      }
+      if (x === rect.width - 1 || !mask[y * rect.width + (x + 1)]) {
+        ctx.moveTo(x1, y0);
+        ctx.lineTo(x1, y1);
+      }
+    }
+  }
+  ctx.stroke();
 }

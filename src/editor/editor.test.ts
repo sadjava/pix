@@ -8,7 +8,7 @@ import { EditorSession, penButtonHover, stylusErasing } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
 import { circleCells, diamondCells, rectOutline } from './tools/shapes.ts';
-import { normalizeSelection, resizeSelectionRect, rotateRegion, snapRotation } from './selection/selection.ts';
+import { fillLasso, normalizeSelection, resizeSelectionRect, rotateRegion, snapRotation } from './selection/selection.ts';
 import { CHECKPOINT_MS } from '../model/types.ts';
 
 function session(width = 8, height = 8, now = () => 0): EditorSession {
@@ -605,6 +605,232 @@ describe('selection', () => {
     expect(taken(editor, rect)).toEqual([4, 5, 6, 1, 2, 3]);
     expect(editor.selection).toEqual(rect);
     expect(editor.history.undo).toHaveLength(1);
+  });
+
+  it('paints and unselects arbitrary shapes using mask brush, and toggles selection on repeated clicks', () => {
+    const editor = session(10, 10);
+    editor.setTool('lasso');
+
+    // First stroke: start at (1, 1), drag to (1, 3)
+    editor.pointerDown({ x: 1, y: 1 });
+    editor.pointerMove({ x: 1, y: 3 });
+    editor.pointerUp();
+
+    expect(editor.selection).not.toBeNull();
+    expect(editor.selection?.x).toBe(1);
+    expect(editor.selection?.y).toBe(1);
+    expect(editor.selection?.width).toBe(1);
+    expect(editor.selection?.height).toBe(3);
+    expect(editor.selection?.mask).toEqual(new Uint8Array([1, 1, 1]));
+
+    // Second stroke: expand selection by painting at (2, 3) and (3, 3)
+    editor.pointerDown({ x: 2, y: 3 });
+    editor.pointerMove({ x: 3, y: 3 });
+    editor.pointerUp();
+
+    expect(editor.selection?.x).toBe(1);
+    expect(editor.selection?.y).toBe(1);
+    expect(editor.selection?.width).toBe(3);
+    expect(editor.selection?.height).toBe(3);
+
+    // Verify (1, 1), (1, 2), (1, 3), (2, 3), (3, 3) are selected
+    expect(editor.selection?.mask?.[0]).toBe(1); // (1, 1)
+    expect(editor.selection?.mask?.[1 * 3 + 0]).toBe(1); // (1, 2)
+    expect(editor.selection?.mask?.[2 * 3 + 0]).toBe(1); // (1, 3)
+    expect(editor.selection?.mask?.[2 * 3 + 1]).toBe(1); // (2, 3)
+    expect(editor.selection?.mask?.[2 * 3 + 2]).toBe(1); // (3, 3)
+    // (2, 2) is unselected (0)
+    expect(editor.selection?.mask?.[1 * 3 + 1]).toBe(0);
+
+    // Repeated click on already selected cell (1, 2) unselects it
+    editor.pointerDown({ x: 1, y: 2 });
+    editor.pointerUp();
+
+    expect(editor.selection?.mask?.[1 * 3 + 0]).toBe(0); // (1, 2) unselected
+    expect(editor.selection?.mask?.[0]).toBe(1); // (1, 1) still selected
+    expect(editor.selection?.mask?.[2 * 3 + 0]).toBe(1); // (1, 3) still selected
+
+    // Deselect clears the selection
+    editor.deselect();
+    expect(editor.selection).toBeNull();
+  });
+
+  it('moves only the masked stitches of an arbitrary shape selection', () => {
+    const editor = session(10, 10);
+    // Fill background with color 9, and draw shape with color 1
+    for (let i = 0; i < 100; i++) editor.doc.cells[i] = 9;
+
+    // Create a triangle mask on cells (0,0), (1,0), (0,1)
+    const tri = fillLasso([{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }]);
+    editor.doc.cells[0] = 1;
+    editor.doc.cells[1] = 1;
+    editor.doc.cells[10] = 1;
+    editor.doc.cells[11] = 2; // (1, 1) is not in triangle mask
+
+    editor.setTool('select');
+    editor.selection = {
+      x: tri.x,
+      y: tri.y,
+      width: tri.width,
+      height: tri.height,
+      mask: tri.mask,
+    };
+
+    // Drag move the selection by dx=+3, dy=+2
+    editor.pointerDown({ x: 0, y: 0 }); // click inside selection
+    editor.pointerMove({ x: 3, y: 2 });
+    editor.pointerUp();
+
+    // Destination cells receive the moved values
+    expect(editor.doc.cells[2 * 10 + 3]).toBe(1);
+    expect(editor.doc.cells[2 * 10 + 4]).toBe(1);
+    expect(editor.doc.cells[3 * 10 + 3]).toBe(1);
+
+    // Source masked cells became 0
+    expect(editor.doc.cells[0]).toBe(0);
+    expect(editor.doc.cells[1]).toBe(0);
+    expect(editor.doc.cells[10]).toBe(0);
+
+    // Cell (1, 1) was NOT in the mask, so it stayed 2!
+    expect(editor.doc.cells[11]).toBe(2);
+
+    // And selection bounding box moved
+    expect(editor.selection?.x).toBe(3);
+    expect(editor.selection?.y).toBe(2);
+  });
+
+  it('copies, cuts and flips an arbitrary shape selection with mask', () => {
+    const editor = session(6, 6);
+    // Triangle: (1,1), (2,1), (1,2)
+    const tri = fillLasso([{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 2 }]);
+    editor.doc.cells[1 * 6 + 1] = 3;
+    editor.doc.cells[1 * 6 + 2] = 4;
+    editor.doc.cells[2 * 6 + 1] = 5;
+    editor.doc.cells[2 * 6 + 2] = 9; // Outside mask in bounding box
+
+    editor.setTool('lasso');
+    editor.selection = {
+      x: tri.x,
+      y: tri.y,
+      width: tri.width,
+      height: tri.height,
+      mask: tri.mask,
+    };
+
+    // Copy selection
+    editor.copySelection();
+    expect(editor.clipboard?.cells[0]).toBe(3);
+    expect(editor.clipboard?.cells[1]).toBe(4);
+    expect(editor.clipboard?.cells[1 * 2 + 0]).toBe(5);
+    // Unmasked cell in clipboard is 0
+    expect(editor.clipboard?.cells[1 * 2 + 1]).toBe(0);
+
+    // Flip horizontally
+    editor.flipSelection('horizontal');
+    // Horizontally mirrored: (2, 1) becomes 3, (1, 1) becomes 4, (2, 2) becomes 5
+    expect(editor.doc.cells[1 * 6 + 2]).toBe(3);
+    expect(editor.doc.cells[1 * 6 + 1]).toBe(4);
+    expect(editor.doc.cells[2 * 6 + 2]).toBe(5);
+    // Source (1, 2) became 0
+    expect(editor.doc.cells[2 * 6 + 1]).toBe(0);
+    // (2, 2) originally had 9, replaced by 5 from the flip; cell outside mask untouched
+    expect(editor.selection?.mask).toBeDefined();
+
+    // Clear selection
+    editor.clearSelection();
+    expect(editor.doc.cells[1 * 6 + 2]).toBe(0);
+    expect(editor.doc.cells[1 * 6 + 1]).toBe(0);
+    expect(editor.doc.cells[2 * 6 + 2]).toBe(0);
+  });
+
+  it('keeps the arbitrary shape mask during paste and after confirm', () => {
+    const editor = session(8, 8);
+    // Draw an L-shaped motif
+    const lShape = fillLasso([{ x: 1, y: 1 }, { x: 1, y: 3 }, { x: 3, y: 3 }, { x: 3, y: 2 }, { x: 2, y: 2 }, { x: 2, y: 1 }]);
+    for (const pt of lShape.points) {
+      editor.doc.cells[pt.y * 8 + pt.x] = 1;
+    }
+
+    editor.setTool('lasso');
+    editor.selection = {
+      x: lShape.x,
+      y: lShape.y,
+      width: lShape.width,
+      height: lShape.height,
+      mask: lShape.mask,
+    };
+
+    editor.copySelection();
+    expect(editor.clipboard?.mask).toBeDefined();
+
+    // Paste
+    editor.beginPaste();
+    const pRect = editor.pasteRect();
+    expect(pRect?.mask).toBeDefined();
+    expect(pRect?.mask).toEqual(lShape.mask);
+
+    // Move paste
+    editor.movePaste(4, 0);
+    expect(editor.pasteRect()?.x).toBe(lShape.x + 4);
+    expect(editor.pasteRect()?.mask).toBeDefined();
+
+    // Confirm paste
+    editor.confirmPaste();
+    expect(editor.selection).not.toBeNull();
+    expect(editor.selection?.mask).toBeDefined();
+    expect(editor.selection?.x).toBe(lShape.x + 4);
+    expect(editor.selection?.width).toBe(lShape.width);
+    expect(editor.selection?.height).toBe(lShape.height);
+
+    // Verify cell inside mask was pasted
+    expect(editor.doc.cells[1 * 8 + (1 + 4)]).toBe(1);
+    // Verify cell outside mask within bounding box is empty (0)
+    expect(editor.doc.cells[1 * 8 + (3 + 4)]).toBe(0);
+  });
+
+  it('does not zero out background drawings outside the selection mask when pasting an arbitrary shape', () => {
+    const editor = session(8, 8);
+    // Fill canvas background with color 1
+    editor.doc.cells.fill(1);
+
+    // Add a second color to the palette for distinction
+    editor.doc.palette = [
+      ...editor.doc.palette,
+      { id: 'c2', name: 'Color 2', hex: '#ff0000' },
+    ];
+
+    // L-shape mask: 2x2 bounding box at (0, 0)
+    // [1, 1]
+    // [1, 0]
+    const mask = new Uint8Array([1, 1, 1, 0]);
+    editor.selection = {
+      x: 0,
+      y: 0,
+      width: 2,
+      height: 2,
+      mask,
+    };
+    // Paint slot 2 into the masked cells
+    editor.doc.cells[0] = 2;
+    editor.doc.cells[1] = 2;
+    editor.doc.cells[1 * 8 + 0] = 2;
+
+    editor.copySelection();
+    editor.beginPaste();
+    editor.movePaste(4, 4);
+    editor.confirmPaste();
+
+    // Cells inside the mask at destination (4, 4), (5, 4), (4, 5) should be updated to slot 2
+    expect(editor.doc.cells[4 * 8 + 4]).toBe(2);
+    expect(editor.doc.cells[4 * 8 + 5]).toBe(2);
+    expect(editor.doc.cells[5 * 8 + 4]).toBe(2);
+
+    // Cell outside mask at destination (5, 5) within bounding box must remain background color 1 (NOT zeroed out)
+    expect(editor.doc.cells[5 * 8 + 5]).toBe(1);
+
+    // Other background cells remain intact
+    expect(editor.doc.cells[3 * 8 + 3]).toBe(1);
+    expect(editor.doc.cells[6 * 8 + 6]).toBe(1);
   });
 });
 

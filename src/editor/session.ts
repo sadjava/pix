@@ -1,5 +1,5 @@
 import { CHECKPOINT_MS, type CellPatch, type ClipboardPayload, type HistoryEntry, type PaletteColor, type Point, type ProjectDocument, type ToolId } from '../model/types.ts';
-import { cloneCells, getCell } from './canvas/grid.ts';
+import { cloneCells, getCell, inBounds } from './canvas/grid.ts';
 import { applyPatches, patchesForValues } from './tools/stroke.ts';
 import { floodIndices } from './tools/fill.ts';
 import { circleCells, diamondCells, lineCells, radiusOf, rectOutline } from './tools/shapes.ts';
@@ -10,10 +10,16 @@ import {
   clearRegion,
   extractRegion,
   flipBuffer,
+  flipMask,
   flipRegion,
+  getSelectionCellSet,
+  insideSelection,
   moveRegion,
   rotateBuffer,
+  rotateMask,
   scaleBuffer,
+  scaleMask,
+  selectionFromCellSet,
   normalizeSelection,
   resizeSelectionRect,
   rotateRegion,
@@ -85,7 +91,14 @@ interface MoveGesture {
   dy: number;
 }
 
-type Gesture = StrokeGesture | ShapeGesture | SelectGesture | MoveGesture;
+interface LassoGesture {
+  kind: 'lasso';
+  mode: 'select' | 'unselect';
+  cells: Set<number>;
+  last: Point;
+}
+
+type Gesture = StrokeGesture | ShapeGesture | SelectGesture | MoveGesture | LassoGesture;
 
 export interface EditorPersistPayload {
   doc: ProjectDocument;
@@ -120,6 +133,7 @@ export class EditorSession {
   pasteWidth = 0;
   pasteHeight = 0;
   pastePalette: PaletteColor[] = [];
+  pasteMask: Uint8Array | null = null;
   pasteClipped = false;
   revision: number;
   gesture: Gesture | null = null;
@@ -141,6 +155,7 @@ export class EditorSession {
   setTool(tool: ToolId): void {
     this.cancelGesture();
     if (tool !== this.tool) this.fillErase = false;
+    if (tool !== 'select' && tool !== 'lasso') this.selection = null;
     this.tool = tool;
   }
 
@@ -208,7 +223,7 @@ export class EditorSession {
       }
       return;
     }
-    if (this.tool !== 'select') this.selection = null;
+    if (this.tool !== 'select' && this.tool !== 'lasso') this.selection = null;
     if (this.tool === 'fill') {
       this.fillAt(cell);
       return;
@@ -228,6 +243,21 @@ export class EditorSession {
         this.selection = null;
         this.gesture = { kind: 'select', anchor: cell, current: cell };
       }
+      return;
+    }
+    if (this.tool === 'lasso') {
+      if (!inBounds(this.doc.width, this.doc.height, cell.x, cell.y)) return;
+      const cells = getSelectionCellSet(this.selection, this.doc.width, this.doc.height);
+      const cellIdx = cell.y * this.doc.width + cell.x;
+      const mode: 'select' | 'unselect' = cells.has(cellIdx) ? 'unselect' : 'select';
+      if (mode === 'select') {
+        cells.add(cellIdx);
+      } else {
+        cells.delete(cellIdx);
+      }
+      this.selection = selectionFromCellSet(cells, this.doc.width);
+      this.gesture = { kind: 'lasso', mode, cells, last: cell };
+      return;
     }
   }
 
@@ -240,6 +270,25 @@ export class EditorSession {
     }
     if (this.gesture.kind === 'shape') this.gesture.current = cell;
     if (this.gesture.kind === 'select') this.gesture.current = cell;
+    if (this.gesture.kind === 'lasso') {
+      if (cell.x !== this.gesture.last.x || cell.y !== this.gesture.last.y) {
+        const seg = lineCells(this.gesture.last, cell);
+        for (let i = 1; i < seg.length; i++) {
+          const pt = seg[i]!;
+          if (inBounds(this.doc.width, this.doc.height, pt.x, pt.y)) {
+            const idx = pt.y * this.doc.width + pt.x;
+            if (this.gesture.mode === 'select') {
+              this.gesture.cells.add(idx);
+            } else {
+              this.gesture.cells.delete(idx);
+            }
+          }
+        }
+        this.gesture.last = cell;
+        this.selection = selectionFromCellSet(this.gesture.cells, this.doc.width);
+      }
+      return;
+    }
     if (this.gesture.kind === 'move') {
       this.gesture.dx += cell.x - this.gesture.last.x;
       this.gesture.dy += cell.y - this.gesture.last.y;
@@ -263,6 +312,9 @@ export class EditorSession {
     }
     if (gesture.kind === 'select') {
       this.selection = normalizeSelection(gesture.anchor, gesture.current);
+      return;
+    }
+    if (gesture.kind === 'lasso') {
       return;
     }
     if (gesture.kind === 'move' && (gesture.dx !== 0 || gesture.dy !== 0) && this.selection) {
@@ -292,6 +344,12 @@ export class EditorSession {
 
   flushOpenStroke(): void {
     if (this.gesture?.kind === 'stroke') this.checkpointStroke();
+  }
+
+  deselect(): void {
+    this.cancelScale();
+    this.cancelRotate();
+    this.selection = null;
   }
 
   liveSelection(): SelectionRect | null {
@@ -368,6 +426,7 @@ export class EditorSession {
     const cells = new Uint16Array(rect.width * rect.height);
     for (let y = 0; y < rect.height; y += 1) {
       for (let x = 0; x < rect.width; x += 1) {
+        if (rect.mask && !rect.mask[y * rect.width + x]) continue;
         const gx = rect.x + x;
         const gy = rect.y + y;
         cells[y * rect.width + x] = gx >= 0 && gy >= 0 && gx < this.doc.width && gy < this.doc.height
@@ -392,7 +451,15 @@ export class EditorSession {
   commitScale(): void {
     if (!this.scaleSource) return;
     const patches = this.scaleSource.patches;
+    const sourceRect = this.scaleSource.rect;
+    const dest = this.selection;
     this.scaleSource = null;
+    if (dest && sourceRect.mask) {
+      this.selection = {
+        ...dest,
+        mask: scaleMask(sourceRect.mask, sourceRect.width, sourceRect.height, dest.width, dest.height),
+      };
+    }
     if (patches.length === 0) return;
     this.commit('scale', patches, true);
   }
@@ -402,7 +469,7 @@ export class EditorSession {
   private scaleSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
   private rotateSource: { rect: SelectionRect; cells: Uint16Array; patches: CellPatch[] } | null = null;
   /** Cells the live rotate or scale started from. The rug is not touched until confirm. */
-  private pasteBase: { origin: Point; width: number; height: number; cells: Uint16Array } | null = null;
+  private pasteBase: { origin: Point; width: number; height: number; cells: Uint16Array; mask: Uint8Array | null } | null = null;
 
   private cancelScale(): void {
     if (!this.scaleSource) return;
@@ -419,6 +486,7 @@ export class EditorSession {
     const cells = new Uint16Array(rect.width * rect.height);
     for (let y = 0; y < rect.height; y += 1) {
       for (let x = 0; x < rect.width; x += 1) {
+        if (rect.mask && !rect.mask[y * rect.width + x]) continue;
         const gx = rect.x + x;
         const gy = rect.y + y;
         cells[y * rect.width + x] = gx >= 0 && gy >= 0 && gx < this.doc.width && gy < this.doc.height
@@ -473,6 +541,7 @@ export class EditorSession {
     this.pasteWidth = clip.width;
     this.pasteHeight = clip.height;
     this.pastePalette = clip.palette;
+    this.pasteMask = clip.mask ? clip.mask.slice() : null;
     this.pasteBase = null;
     this.rotationDegrees = null;
     this.pasteClipped = false;
@@ -480,17 +549,33 @@ export class EditorSession {
 
   pasteRect(): SelectionRect | null {
     if (!this.pasteOrigin || !this.pasteCells) return null;
-    return { x: this.pasteOrigin.x, y: this.pasteOrigin.y, width: this.pasteWidth, height: this.pasteHeight };
+    return {
+      x: this.pasteOrigin.x,
+      y: this.pasteOrigin.y,
+      width: this.pasteWidth,
+      height: this.pasteHeight,
+      mask: this.pasteMask ?? undefined,
+    };
   }
 
   flipSelection(axis: 'horizontal' | 'vertical'): void {
     if (this.pasteOrigin && this.pasteCells) {
       this.finishPasteEdit();
       this.pasteCells = flipBuffer(this.pasteCells, this.pasteWidth, this.pasteHeight, axis);
+      if (this.pasteMask) {
+        this.pasteMask = flipMask(this.pasteMask, this.pasteWidth, this.pasteHeight, axis);
+      }
       return;
     }
     if (!this.selection) return;
+    const flippedMask = this.selection.mask
+      ? flipMask(this.selection.mask, this.selection.width, this.selection.height, axis)
+      : undefined;
     const patches = flipRegion(this.doc.cells, this.doc.width, this.doc.height, this.selection, axis);
+    this.selection = {
+      ...this.selection,
+      mask: flippedMask,
+    };
     this.applyCommit('flip', patches);
   }
 
@@ -508,6 +593,7 @@ export class EditorSession {
       width: this.pasteWidth,
       height: this.pasteHeight,
       cells: this.pasteCells.slice(),
+      mask: this.pasteMask ? this.pasteMask.slice() : null,
     };
     this.rotationDegrees = 0;
   }
@@ -520,6 +606,10 @@ export class EditorSession {
     this.pasteWidth = turned.width;
     this.pasteHeight = turned.height;
     this.pasteOrigin = { x: base.origin.x + turned.dx, y: base.origin.y + turned.dy };
+    if (base.mask) {
+      const turnedMask = rotateMask(base.mask, base.width, base.height, radians);
+      this.pasteMask = turnedMask.mask;
+    }
     const degrees = Math.round((radians * 180) / Math.PI);
     this.rotationDegrees = ((degrees % 360) + 360) % 360;
   }
@@ -532,6 +622,7 @@ export class EditorSession {
       width: this.pasteWidth,
       height: this.pasteHeight,
       cells: this.pasteCells.slice(),
+      mask: this.pasteMask ? this.pasteMask.slice() : null,
     };
   }
 
@@ -549,6 +640,9 @@ export class EditorSession {
     this.pasteWidth = dest.width;
     this.pasteHeight = dest.height;
     this.pasteCells = scaleBuffer(base.cells, base.width, base.height, dest.width, dest.height);
+    if (base.mask) {
+      this.pasteMask = scaleMask(base.mask, base.width, base.height, dest.width, dest.height);
+    }
   }
 
   /** Keep the draft as it looks now. Still nothing is written onto the rug. */
@@ -568,7 +662,14 @@ export class EditorSession {
       this.doc.width,
       this.doc.height,
       this.doc.palette,
-      { schemaVersion: 1, width, height, cells: this.pasteCells, palette: this.pastePalette },
+      {
+        schemaVersion: 1,
+        width,
+        height,
+        cells: this.pasteCells,
+        palette: this.pastePalette,
+        mask: this.pasteMask ? this.pasteMask.slice() : undefined,
+      },
       origin,
       this.doc.symmetry,
     );
@@ -576,12 +677,37 @@ export class EditorSession {
     this.pasteClipped = result.clipped;
     if (result.clipped) this.notice = 'Часть выходит за холст';
     this.applyCommit('paste', result.patches);
-    this.clearPaste();
     const x0 = Math.max(0, Math.min(this.doc.width - 1, origin.x));
     const y0 = Math.max(0, Math.min(this.doc.height - 1, origin.y));
     const x1 = Math.max(x0, Math.min(this.doc.width - 1, origin.x + width - 1));
     const y1 = Math.max(y0, Math.min(this.doc.height - 1, origin.y + height - 1));
-    this.selection = { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+    let finalMask: Uint8Array | undefined;
+    if (this.pasteMask) {
+      const selWidth = x1 - x0 + 1;
+      const selHeight = y1 - y0 + 1;
+      if (selWidth === width && selHeight === height && x0 === origin.x && y0 === origin.y) {
+        finalMask = this.pasteMask.slice();
+      } else {
+        finalMask = new Uint8Array(selWidth * selHeight);
+        for (let y = 0; y < selHeight; y++) {
+          for (let x = 0; x < selWidth; x++) {
+            const srcX = x0 + x - origin.x;
+            const srcY = y0 + y - origin.y;
+            if (srcX >= 0 && srcX < width && srcY >= 0 && srcY < height) {
+              finalMask[y * selWidth + x] = this.pasteMask[srcY * width + srcX] ?? 0;
+            }
+          }
+        }
+      }
+    }
+    this.clearPaste();
+    this.selection = {
+      x: x0,
+      y: y0,
+      width: x1 - x0 + 1,
+      height: y1 - y0 + 1,
+      mask: finalMask,
+    };
   }
 
   cancelPaste(): void {
@@ -595,6 +721,7 @@ export class EditorSession {
     this.pasteWidth = 0;
     this.pasteHeight = 0;
     this.pastePalette = [];
+    this.pasteMask = null;
     this.pasteBase = null;
     this.rotationDegrees = null;
   }
@@ -793,7 +920,7 @@ function square(cell: Point, size: number): Point[] {
 }
 
 function inside(rect: SelectionRect, point: Point): boolean {
-  return point.x >= rect.x && point.y >= rect.y && point.x < rect.x + rect.width && point.y < rect.y + rect.height;
+  return insideSelection(rect, point);
 }
 
 function rectPoints(rect: SelectionRect): Point[] {

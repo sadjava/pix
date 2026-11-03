@@ -8,7 +8,7 @@ import { symmetryCopies } from '../symmetry/reflect.ts';
 import { Icon } from '../icons.tsx';
 import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, containViewport, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
-import { snapRotation, type SelectionHandle, type SelectionRect } from '../selection/selection.ts';
+import { drawMaskOutline, snapRotation, type SelectionHandle, type SelectionRect } from '../selection/selection.ts';
 import { gripAt, placeTrace, type SourceCrop, type TraceFrame, type TraceGrip, type TraceSprite } from '../trace/trace.ts';
 
 type AxisName = 'vertical' | 'horizontal';
@@ -176,6 +176,20 @@ export function CanvasView({
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' || event.code === 'Escape') {
+        if (session.pasteOrigin) {
+          event.preventDefault();
+          session.cancelPaste();
+          onChange();
+          return;
+        }
+        if (session.selection) {
+          event.preventDefault();
+          session.deselect();
+          onChange();
+          return;
+        }
+      }
       if (event.code !== 'Space' || editingTarget(event.target)) return;
       event.preventDefault();
       space.current = true;
@@ -189,7 +203,7 @@ export function CanvasView({
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
     };
-  }, []);
+  }, [session, onChange]);
 
   function commitTrace(): void {
     const tracing = traceDrag.current;
@@ -310,7 +324,7 @@ export function CanvasView({
           pasteDrag.current = cellAt(event);
           return;
         }
-        if (session.tool === 'select' && session.selection) {
+        if ((session.tool === 'select' || session.tool === 'lasso') && session.selection) {
           if (rotateHandleAt(session, event.clientX, event.clientY, event.currentTarget)) {
             session.startRotate();
             rotateDrag.current = true;
@@ -710,6 +724,7 @@ function draw(
   if (paste && session.pasteCells) {
     for (let y = 0; y < paste.height; y += 1) {
       for (let x = 0; x < paste.width; x += 1) {
+        if (paste.mask && !paste.mask[y * paste.width + x]) continue;
         const slot = session.pasteCells[y * paste.width + x] ?? 0;
         if (slot === 0) continue;
         overlayCtx.fillStyle = session.pastePalette[slot - 1]?.hex ?? '#1a1614';
@@ -718,11 +733,51 @@ function draw(
         }
       }
     }
-    strokeRect(overlayCtx, paste, viewport, '#243e66');
+    if (paste.mask) {
+      drawMaskOutline(overlayCtx, paste, cellPx, viewport.panX, viewport.panY, '#243e66');
+      overlayCtx.save();
+      overlayCtx.setLineDash([4, 4]);
+      strokeRect(overlayCtx, paste, viewport, 'rgba(36, 62, 102, 0.45)');
+      overlayCtx.restore();
+    } else {
+      strokeRect(overlayCtx, paste, viewport, '#243e66');
+    }
     drawHandles(overlayCtx, paste, viewport, session.rotationDegrees);
   } else if (session.selection) {
-    strokeRect(overlayCtx, session.selection, viewport, '#243e66');
-    if (session.tool === 'select' && session.selection) drawHandles(overlayCtx, session.selection, viewport, session.rotationDegrees);
+    const sel = session.selection;
+    const mask = sel.mask;
+    if (mask) {
+      overlayCtx.fillStyle = 'rgba(36, 62, 102, 0.2)';
+      for (let y = 0; y < sel.height; y++) {
+        for (let x = 0; x < sel.width; x++) {
+          if (mask[y * sel.width + x]) {
+            overlayCtx.fillRect(
+              viewport.panX + (sel.x + x) * cellPx,
+              viewport.panY + (sel.y + y) * cellPx,
+              cellPx,
+              cellPx,
+            );
+          }
+        }
+      }
+      drawMaskOutline(overlayCtx, sel, cellPx, viewport.panX, viewport.panY, '#243e66');
+      overlayCtx.save();
+      overlayCtx.setLineDash([4, 4]);
+      strokeRect(overlayCtx, sel, viewport, 'rgba(36, 62, 102, 0.45)');
+      overlayCtx.restore();
+    } else {
+      overlayCtx.fillStyle = 'rgba(36, 62, 102, 0.1)';
+      overlayCtx.fillRect(
+        viewport.panX + sel.x * cellPx,
+        viewport.panY + sel.y * cellPx,
+        sel.width * cellPx,
+        sel.height * cellPx,
+      );
+      strokeRect(overlayCtx, sel, viewport, '#243e66');
+    }
+    if ((session.tool === 'select' || session.tool === 'lasso') && session.selection) {
+      drawHandles(overlayCtx, session.selection, viewport, session.rotationDegrees);
+    }
   }
   drawAxes(overlayCtx, session, viewport, dragging);
   if (session.tool === 'trace') {

@@ -58,6 +58,7 @@ export const ru = {
   diamond: 'Ромб',
   select: 'Выделение',
   lasso: 'Выделение кистью',
+  selectFill: 'Выделение заливкой',
   pan: 'Сдвиг',
   trace: 'Картинка',
   traceAdd: 'Вставить картинку',

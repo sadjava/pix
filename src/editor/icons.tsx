@@ -11,6 +11,7 @@ export type IconName =
   | 'diamond'
   | 'select'
   | 'lasso'
+  | 'wand'
   | 'pan'
   | 'undo'
   | 'redo'
@@ -87,6 +88,15 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <path d="M7 22a5 5 0 0 1-2-4c0-3.8 3.5-7 9-7 4.5 0 7 2.5 7 5.5s-3 5.5-7.5 5.5c-3 0-5.5-1.5-6.5-3.5L3 22" />
       <path d="m4 17 3 3" />
+    </>
+  ),
+  wand: (
+    <>
+      <path d="m3 21 9-9" />
+      <path d="m12.2 6.8 2.5-2.5a2.12 2.12 0 0 1 3 3l-2.5 2.5" />
+      <path d="M19 2v4M21 4h-4" />
+      <path d="M5 2v2M6 3H4" />
+      <path d="M19 13v2M20 14h-2" />
     </>
   ),
   pan: (

@@ -155,7 +155,7 @@ export class EditorSession {
   setTool(tool: ToolId): void {
     this.cancelGesture();
     if (tool !== this.tool) this.fillErase = false;
-    if (tool !== 'select' && tool !== 'lasso') this.selection = null;
+    if (tool !== 'select' && tool !== 'lasso' && tool !== 'selectFill') this.selection = null;
     this.tool = tool;
   }
 
@@ -223,9 +223,13 @@ export class EditorSession {
       }
       return;
     }
-    if (this.tool !== 'select' && this.tool !== 'lasso') this.selection = null;
+    if (this.tool !== 'select' && this.tool !== 'lasso' && this.tool !== 'selectFill') this.selection = null;
     if (this.tool === 'fill') {
       this.fillAt(cell);
+      return;
+    }
+    if (this.tool === 'selectFill') {
+      this.selectFillAt(cell);
       return;
     }
     if (this.tool === 'pencil' || this.tool === 'eraser') {
@@ -240,7 +244,6 @@ export class EditorSession {
       if (this.selection && inside(this.selection, cell)) {
         this.gesture = { kind: 'move', last: cell, originRect: this.selection, dx: 0, dy: 0 };
       } else {
-        this.selection = null;
         this.gesture = { kind: 'select', anchor: cell, current: cell };
       }
       return;
@@ -311,7 +314,21 @@ export class EditorSession {
       return;
     }
     if (gesture.kind === 'select') {
-      this.selection = normalizeSelection(gesture.anchor, gesture.current);
+      const rect = normalizeSelection(gesture.anchor, gesture.current);
+      const cells = getSelectionCellSet(this.selection, this.doc.width, this.doc.height);
+      const rectPointsList: Point[] = [];
+      for (let y = 0; y < rect.height; y++) {
+        for (let x = 0; x < rect.width; x++) {
+          rectPointsList.push({ x: rect.x + x, y: rect.y + y });
+        }
+      }
+      const points = reflectPoints(rectPointsList, this.doc.symmetry, this.doc.width, this.doc.height);
+      for (const pt of points) {
+        if (inBounds(this.doc.width, this.doc.height, pt.x, pt.y)) {
+          cells.add(pt.y * this.doc.width + pt.x);
+        }
+      }
+      this.selection = selectionFromCellSet(cells, this.doc.width);
       return;
     }
     if (gesture.kind === 'lasso') {
@@ -808,6 +825,33 @@ export class EditorSession {
       patches.push({ index, before, after: value });
     }
     this.applyCommit('fill', patches);
+  }
+
+  selectFillAt(seed: Point): void {
+    if (!inBounds(this.doc.width, this.doc.height, seed.x, seed.y)) return;
+    const cells = getSelectionCellSet(this.selection, this.doc.width, this.doc.height);
+    const startIdx = indexOf(this.doc.width, seed.x, seed.y);
+    const mode: 'select' | 'unselect' = cells.has(startIdx) ? 'unselect' : 'select';
+
+    const seeds = reflectPoints([seed], this.doc.symmetry, this.doc.width, this.doc.height);
+    const targetIndices = new Set<number>();
+    for (const pt of seeds) {
+      const ptIdx = indexOf(this.doc.width, pt.x, pt.y);
+      if (targetIndices.has(ptIdx)) continue;
+      for (const idx of floodIndices(this.doc.cells, this.doc.width, this.doc.height, pt.x, pt.y)) {
+        targetIndices.add(idx);
+      }
+    }
+
+    for (const idx of targetIndices) {
+      if (mode === 'select') {
+        cells.add(idx);
+      } else {
+        cells.delete(idx);
+      }
+    }
+
+    this.selection = selectionFromCellSet(cells, this.doc.width);
   }
 
   private extendStroke(cell: Point): void {

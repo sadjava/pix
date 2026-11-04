@@ -30,6 +30,7 @@ const tools: { id: ToolId; label: string; icon: IconName }[] = [
   { id: 'diamond', label: ru.diamond, icon: 'diamond' },
   { id: 'select', label: ru.select, icon: 'select' },
   { id: 'lasso', label: ru.lasso, icon: 'lasso' },
+  { id: 'selectFill', label: ru.selectFill, icon: 'wand' },
   { id: 'pan', label: ru.pan, icon: 'pan' },
   { id: 'trace', label: ru.trace, icon: 'image' },
 ];
@@ -472,6 +473,16 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
               onClick={() => { session.setTool('lasso'); refresh(); }}
             >
               <Icon name="lasso" />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label={ru.selectFill}
+              title={ru.selectFill}
+              aria-pressed={session.tool === 'selectFill'}
+              onClick={() => { session.setTool('selectFill'); refresh(); }}
+            >
+              <Icon name="wand" />
             </button>
             <button
               type="button"

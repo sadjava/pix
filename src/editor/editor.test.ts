@@ -8,7 +8,7 @@ import { EditorSession, penButtonHover, stylusErasing } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
 import { circleCells, diamondCells, rectOutline } from './tools/shapes.ts';
-import { fillLasso, normalizeSelection, resizeSelectionRect, rotateRegion, snapRotation } from './selection/selection.ts';
+import { fillLasso, getSelectionCellSet, normalizeSelection, resizeSelectionRect, rotateRegion, snapRotation } from './selection/selection.ts';
 import { CHECKPOINT_MS } from '../model/types.ts';
 
 function session(width = 8, height = 8, now = () => 0): EditorSession {
@@ -569,7 +569,7 @@ describe('selection', () => {
     expect(editor.clipboard?.cells[0]).toBe(clip);
     expect(editor.doc.cells[1 * 12 + 1]).toBe(1);
     expect(editor.doc.cells[1 * 12 + 3]).toBe(1);
-    expect(editor.selection).toEqual({ x: 3, y: 1, width: 1, height: 1 });
+    expect(editor.selection).toMatchObject({ x: 3, y: 1, width: 1, height: 1 });
   });
 
   it('maps colors by hex across palettes and clips past the edge', () => {
@@ -888,6 +888,142 @@ describe('selection', () => {
     // Other background cells remain intact
     expect(editor.doc.cells[3 * 8 + 3]).toBe(1);
     expect(editor.doc.cells[6 * 8 + 6]).toBe(1);
+  });
+
+  it('selects all connected pixels of the same color with selectFill and toggles selection on repeated click', () => {
+    const editor = session(10, 10);
+    // Draw a 3x3 square of color 1 at (2, 2)
+    for (let y = 2; y <= 4; y++) {
+      for (let x = 2; x <= 4; x++) {
+        editor.doc.cells[y * 10 + x] = 1;
+      }
+    }
+    // And an isolated pixel of color 1 at (8, 8)
+    editor.doc.cells[8 * 10 + 8] = 1;
+
+    editor.setTool('selectFill');
+    editor.pointerDown({ x: 3, y: 3 });
+
+    // Should have selected the 3x3 square (9 cells)
+    expect(editor.selection).not.toBeNull();
+    expect(editor.selection?.x).toBe(2);
+    expect(editor.selection?.y).toBe(2);
+    expect(editor.selection?.width).toBe(3);
+    expect(editor.selection?.height).toBe(3);
+    expect(editor.selection?.mask).toEqual(new Uint8Array(9).fill(1));
+
+    // Isolated pixel at (8, 8) was not 4-connected, so not selected
+    const set = getSelectionCellSet(editor.selection, 10, 10);
+    expect(set.has(8 * 10 + 8)).toBe(false);
+
+    // Repeated click on the selected square unselects it
+    editor.pointerDown({ x: 3, y: 3 });
+    expect(editor.selection).toBeNull();
+  });
+
+  it('combines selectFill and lasso brush iteratively without losing selection', () => {
+    const editor = session(10, 10);
+    // Object 1: color 1 at (1, 1), (1, 2)
+    editor.doc.cells[1 * 10 + 1] = 1;
+    editor.doc.cells[2 * 10 + 1] = 1;
+    // Object 2: color 2 at (5, 5), (5, 6)
+    editor.doc.cells[5 * 10 + 5] = 2;
+    editor.doc.cells[6 * 10 + 5] = 2;
+
+    // 1. Flood select Object 1
+    editor.setTool('selectFill');
+    editor.pointerDown({ x: 1, y: 1 });
+    let set = getSelectionCellSet(editor.selection, 10, 10);
+    expect(set.size).toBe(2);
+    expect(set.has(1 * 10 + 1)).toBe(true);
+    expect(set.has(2 * 10 + 1)).toBe(true);
+
+    // 2. Switch to lasso and brush-select an extra pixel at (3, 3)
+    editor.setTool('lasso');
+    expect(editor.selection).not.toBeNull();
+    editor.pointerDown({ x: 3, y: 3 });
+    editor.pointerUp();
+    set = getSelectionCellSet(editor.selection, 10, 10);
+    expect(set.size).toBe(3);
+    expect(set.has(3 * 10 + 3)).toBe(true);
+
+    // 3. Switch back to selectFill and flood select Object 2
+    editor.setTool('selectFill');
+    expect(editor.selection).not.toBeNull();
+    editor.pointerDown({ x: 5, y: 5 });
+    set = getSelectionCellSet(editor.selection, 10, 10);
+    expect(set.size).toBe(5);
+    expect(set.has(5 * 10 + 5)).toBe(true);
+    expect(set.has(6 * 10 + 5)).toBe(true);
+    expect(set.has(1 * 10 + 1)).toBe(true);
+    expect(set.has(3 * 10 + 3)).toBe(true);
+  });
+
+  it('mirrors selectFill across symmetry axes', () => {
+    const editor = session(10, 10);
+    editor.doc.symmetry = { mode: 'vertical', axisX2: 10, axisY2: 0, showAxes: true };
+    // Left patch: (1, 1) color 1
+    editor.doc.cells[1 * 10 + 1] = 1;
+    // Right reflected patch: (8, 1) color 1
+    editor.doc.cells[1 * 10 + 8] = 1;
+
+    editor.setTool('selectFill');
+    editor.pointerDown({ x: 1, y: 1 });
+
+    const set = getSelectionCellSet(editor.selection, 10, 10);
+    expect(set.has(1 * 10 + 1)).toBe(true);
+    expect(set.has(1 * 10 + 8)).toBe(true);
+    expect(set.size).toBe(2);
+  });
+
+  it('seamlessly combines rectangular select, lasso brush, and selectFill into one unified selection', () => {
+    const editor = session(20, 20);
+    // 1. Select a 3x3 rectangle at (1, 1) using 'select'
+    editor.setTool('select');
+    editor.pointerDown({ x: 1, y: 1 });
+    editor.pointerMove({ x: 3, y: 3 });
+    editor.pointerUp();
+    let set = getSelectionCellSet(editor.selection, 20, 20);
+    expect(set.size).toBe(9);
+
+    // 2. Switch to 'lasso' and brush an extra pixel at (5, 5)
+    editor.setTool('lasso');
+    expect(editor.selection).not.toBeNull();
+    editor.pointerDown({ x: 5, y: 5 });
+    editor.pointerUp();
+    set = getSelectionCellSet(editor.selection, 20, 20);
+    expect(set.size).toBe(10);
+    expect(set.has(5 * 20 + 5)).toBe(true);
+
+    // 3. Switch to 'selectFill' and flood-select a 2x2 shape of color 2 at (10, 10)
+    editor.doc.cells[10 * 20 + 10] = 2;
+    editor.doc.cells[10 * 20 + 11] = 2;
+    editor.doc.cells[11 * 20 + 10] = 2;
+    editor.doc.cells[11 * 20 + 11] = 2;
+
+    editor.setTool('selectFill');
+    expect(editor.selection).not.toBeNull();
+    editor.pointerDown({ x: 10, y: 10 });
+    set = getSelectionCellSet(editor.selection, 20, 20);
+    expect(set.size).toBe(14);
+    expect(set.has(10 * 20 + 10)).toBe(true);
+
+    // 4. Switch back to 'select' and drag another rectangle at (15, 15) to (16, 16)
+    editor.setTool('select');
+    expect(editor.selection).not.toBeNull();
+    editor.pointerDown({ x: 15, y: 15 });
+    editor.pointerMove({ x: 16, y: 16 });
+    editor.pointerUp();
+    set = getSelectionCellSet(editor.selection, 20, 20);
+    expect(set.size).toBe(18);
+    expect(set.has(15 * 20 + 15)).toBe(true);
+    expect(set.has(16 * 20 + 16)).toBe(true);
+
+    // 5. Drag to move the unified selection
+    editor.pointerDown({ x: 1, y: 1 });
+    editor.pointerMove({ x: 2, y: 1 });
+    editor.pointerUp();
+    expect(editor.selection?.x).toBe(2);
   });
 });
 

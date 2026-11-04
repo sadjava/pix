@@ -324,7 +324,7 @@ export function CanvasView({
           pasteDrag.current = cellAt(event);
           return;
         }
-        if ((session.tool === 'select' || session.tool === 'lasso') && session.selection) {
+        if ((session.tool === 'select' || session.tool === 'lasso' || session.tool === 'selectFill') && session.selection) {
           if (rotateHandleAt(session, event.clientX, event.clientY, event.currentTarget)) {
             session.startRotate();
             rotateDrag.current = true;
@@ -775,7 +775,7 @@ function draw(
       );
       strokeRect(overlayCtx, sel, viewport, '#243e66');
     }
-    if ((session.tool === 'select' || session.tool === 'lasso') && session.selection) {
+    if ((session.tool === 'select' || session.tool === 'lasso' || session.tool === 'selectFill') && session.selection) {
       drawHandles(overlayCtx, session.selection, viewport, session.rotationDegrees);
     }
   }

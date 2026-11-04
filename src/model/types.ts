@@ -129,6 +129,7 @@ export type ToolId =
   | 'diamond'
   | 'select'
   | 'lasso'
+  | 'selectFill'
   | 'pan'
   | 'trace';
 

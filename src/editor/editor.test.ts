@@ -409,7 +409,7 @@ describe('shapes', () => {
 describe('recent colors', () => {
   it('keeps an existing hex in place and appends a new one', () => {
     const palette = createDocument(2, 2).palette;
-    expect(pickRecentColor(palette, [1], '#1a1614')).toMatchObject({ slot: 1, palette });
+    expect(pickRecentColor(palette, [1], '#000000')).toMatchObject({ slot: 1, palette });
     const added = pickRecentColor(palette, [1], '#112233');
     expect(added?.slot).toBe(2);
     expect(added?.palette).toHaveLength(2);
@@ -428,7 +428,7 @@ describe('recent colors', () => {
     expect(palette).toHaveLength(8);
     const added = pickRecentColor(palette, order, '#abcdef');
     expect(added?.palette).toHaveLength(9);
-    expect(added?.palette[0]?.hex).toBe('#1a1614');
+    expect(added?.palette[0]?.hex).toBe('#000000');
     expect(added?.slot).toBe(9);
     expect(added?.order).toHaveLength(9);
     expect(added?.order[0]).toBe(1);
@@ -441,7 +441,7 @@ describe('recolor and delete', () => {
     editor.doc.cells[0] = 1;
     editor.useColor('#112233');
     expect(editor.doc.cells[0]).toBe(1);
-    expect(editor.doc.palette[0]?.hex).toBe('#1a1614');
+    expect(editor.doc.palette[0]?.hex).toBe('#000000');
     expect(editor.doc.palette[1]?.hex).toBe('#112233');
     expect(editor.colorSlot).toBe(2);
   });
@@ -454,7 +454,7 @@ describe('recolor and delete', () => {
     editor.setColorSlot(1);
     expect(editor.dismissColor(0)).toBe(true);
     expect(editor.doc.palette[0]?.hidden).toBe(true);
-    expect(editor.doc.palette[0]?.hex).toBe('#1a1614');
+    expect(editor.doc.palette[0]?.hex).toBe('#000000');
     expect(editor.doc.cells[0]).toBe(1);
     expect(editor.doc.cells[1]).toBe(2);
     expect(editor.colorSlot).toBe(2);

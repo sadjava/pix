@@ -543,7 +543,7 @@ export function CanvasView({
           <button
             type="button"
             className="color-prev"
-            style={session.previousSlot ? { background: session.doc.palette[session.previousSlot - 1]?.hex ?? '#1a1614' } : undefined}
+            style={session.previousSlot ? { background: session.doc.palette[session.previousSlot - 1]?.hex ?? '#000000' } : undefined}
             aria-label={ru.previousColor}
             title={ru.previousColor}
             disabled={session.previousSlot == null}
@@ -552,7 +552,7 @@ export function CanvasView({
           <button
             type="button"
             className="color-now"
-            style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614' }}
+            style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#000000' }}
             aria-label={ru.currentColor}
             title={ru.currentColor}
             onClick={() => { session.swapColors(); onChange(); }}
@@ -563,7 +563,7 @@ export function CanvasView({
             <input
               type="color"
               aria-label={ru.pickColor}
-              value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#1a1614'}
+              value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#000000'}
               onChange={(event) => {
                 const hex = event.target.value;
                 setDraftHex(hex);
@@ -727,7 +727,7 @@ function draw(
         if (paste.mask && !paste.mask[y * paste.width + x]) continue;
         const slot = session.pasteCells[y * paste.width + x] ?? 0;
         if (slot === 0) continue;
-        overlayCtx.fillStyle = session.pastePalette[slot - 1]?.hex ?? '#1a1614';
+        overlayCtx.fillStyle = session.pastePalette[slot - 1]?.hex ?? '#000000';
         for (const dest of symmetryCopies({ x: paste.x + x, y: paste.y + y }, session.doc.symmetry)) {
           overlayCtx.fillRect(viewport.panX + dest.x * cellPx, viewport.panY + dest.y * cellPx, cellPx, cellPx);
         }

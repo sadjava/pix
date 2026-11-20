@@ -10,7 +10,7 @@ export function normalizeHex(hex: string): string | null {
 }
 
 export function defaultPalette(): PaletteColor[] {
-  return [{ id: 'ink', name: 'Чернь', hex: '#1a1614' }];
+  return [{ id: 'black', name: 'Чёрный', hex: '#000000' }];
 }
 
 /**

@@ -11,7 +11,7 @@ describe('png export', () => {
     const clean = renderRgba(doc, { grid: false, checker: false, pixelsPerCell: 4, border: false, checkerBlock: 1 });
     expect(clean.width).toBe(8);
     expect(clean.height).toBe(8);
-    expect([clean.data[0], clean.data[1], clean.data[2], clean.data[3]]).toEqual([26, 22, 20, 255]);
+    expect([clean.data[0], clean.data[1], clean.data[2], clean.data[3]]).toEqual([0, 0, 0, 255]);
     const interior = (5 * 8 + 5) * 4;
     expect(clean.data[interior + 3]).toBe(0);
     const checker = renderRgba(doc, { grid: false, checker: true, pixelsPerCell: 4, border: false, checkerBlock: 1 });
@@ -19,7 +19,7 @@ describe('png export', () => {
     const grid = renderRgba(doc, { grid: true, checker: false, pixelsPerCell: 4, border: false, checkerBlock: 1 });
     expect([grid.data[0], grid.data[1], grid.data[2]]).toEqual([42, 34, 28]);
     expect([grid.data[(1 * 8 + 1) * 4], grid.data[(1 * 8 + 1) * 4 + 1], grid.data[(1 * 8 + 1) * 4 + 2]]).toEqual([
-      26, 22, 20,
+      0, 0, 0,
     ]);
     const once = pngBytes(doc, { grid: true, checker: true, pixelsPerCell: 3, border: false, checkerBlock: 2 });
     const twice = pngBytes(doc, { grid: true, checker: true, pixelsPerCell: 3, border: false, checkerBlock: 2 });
@@ -38,8 +38,8 @@ describe('png export', () => {
       return [image.data[index], image.data[index + 1], image.data[index + 2], image.data[index + 3]];
     };
     expect(pixel(0, 0)).toEqual([0, 0, 0, 0]);
-    expect(pixel(0, 2)).toEqual([26, 22, 20, 255]);
-    expect(pixel(1, 2)).toEqual([26, 22, 20, 255]);
+    expect(pixel(0, 2)).toEqual([0, 0, 0, 255]);
+    expect(pixel(1, 2)).toEqual([0, 0, 0, 255]);
     expect(pixel(2, 2)[3]).toBe(0);
     const wide = createDocument(13, 2);
     wide.cells[13] = 1;

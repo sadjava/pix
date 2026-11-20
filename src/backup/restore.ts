@@ -2,6 +2,7 @@ import type { PaletteColor, ProjectDocument, ProjectRecord, SymmetrySettings } f
 import { sha256Hex } from '../export/checksum.ts';
 import { base64ToCells, cellsToBase64, cellsToBytes } from '../export/json.ts';
 import { createDocument } from '../editor/canvas/grid.ts';
+import { migratePalette } from '../editor/palette/palette.ts';
 import type { CloudTrace, RugRow } from './protocol.ts';
 
 export async function rugFromDocument(
@@ -105,8 +106,9 @@ export async function documentFromRow(row: RugRow): Promise<ProjectDocument | nu
   if (!cells) return null;
   const hash = await sha256Hex(cellsToBytes(cells));
   if (hash !== row.contentHash) return null;
-  const palette = row.palette.filter((color): color is PaletteColor => Boolean(color?.id && color.hex && color.name));
-  if (palette.length !== row.palette.length) return null;
+  const rawPalette = row.palette.filter((color): color is PaletteColor => Boolean(color?.id && color.hex && color.name));
+  if (rawPalette.length !== row.palette.length) return null;
+  const palette = migratePalette(rawPalette, cells);
   const doc = createDocument(row.width, row.height, palette);
   doc.cells = cells;
   doc.gridVisible = row.gridVisible;

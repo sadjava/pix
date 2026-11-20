@@ -160,6 +160,20 @@ describe('local projects', () => {
     expect(unknown.ok).toBe(false);
   });
 
+  it('migrates legacy #1a1614 snapshot palette to #000000 on load and updates DB', async () => {
+    const repo = ProjectRepository.open('legacy-ink');
+    const created = await repo.create({ name: 'Старый ковёр', width: 2, height: 2 });
+    await repo.db.snapshots.update(created.record.id, {
+      palette: [{ id: 'ink', name: 'Чернь', hex: '#1a1614' }],
+    });
+    const loaded = await repo.load(created.record.id);
+    expect('doc' in loaded && loaded.doc.palette[0]?.hex).toBe('#000000');
+    expect('doc' in loaded && loaded.doc.palette[0]?.name).toBe('Чёрный');
+    const updatedSnapshot = await repo.db.snapshots.get(created.record.id);
+    expect(updatedSnapshot?.palette[0]?.hex).toBe('#000000');
+    repo.close();
+  });
+
   it('switches projects only after the previous edit is stored', async () => {
     const repo = ProjectRepository.open('switch');
     const first = await repo.create({ name: '1', width: 4, height: 2 });

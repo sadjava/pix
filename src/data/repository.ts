@@ -172,6 +172,9 @@ export class ProjectRepository {
     if (!record || !snapshot) return { error: 'Проект не найден.' };
     const migrated = migrateDocument(snapshotToRaw(snapshot));
     if (!migrated.ok) return migrated;
+    if (JSON.stringify(migrated.doc.palette) !== JSON.stringify(snapshot.palette)) {
+      await this.db.snapshots.update(id, { palette: migrated.doc.palette });
+    }
     if (migrated.doc.cells.length !== snapshot.width * snapshot.height) {
       return { error: 'Запись повреждена. Исходные данные не изменены.' };
     }

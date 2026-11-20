@@ -3,7 +3,7 @@ import { backingStoreSize, containViewport, gestureViewport, resizeViewport, scr
 import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
-import { pickRecentColor } from './palette/palette.ts';
+import { migratePalette, pickRecentColor } from './palette/palette.ts';
 import { EditorSession, penButtonHover, stylusErasing } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
@@ -457,6 +457,47 @@ describe('recolor and delete', () => {
     expect(editor.doc.palette[0]?.hex).toBe('#000000');
     expect(editor.doc.cells[0]).toBe(1);
     expect(editor.doc.cells[1]).toBe(2);
+    expect(editor.colorSlot).toBe(2);
+  });
+
+  it('migrates empty or legacy palette directly via migratePalette', () => {
+    expect(migratePalette([])).toEqual([{ id: 'black', name: 'Чёрный', hex: '#000000' }]);
+  });
+
+  it('migrates legacy #1a1614 ink palette to pure black #000000 on opening', () => {
+    const doc = createDocument(2, 2, [{ id: 'ink', name: 'Чернь', hex: '#1a1614' }]);
+    const editor = new EditorSession(doc);
+    expect(editor.doc.palette[0]?.hex).toBe('#000000');
+    expect(editor.doc.palette[0]?.name).toBe('Чёрный');
+    expect(editor.colorSlot).toBe(1);
+  });
+
+  it('selects black #000000 by default when opening even if black is not slot 1', () => {
+    const doc = createDocument(2, 2, [
+      { id: 'red', name: 'Красный', hex: '#ff0000' },
+      { id: 'black', name: 'Чёрный', hex: '#000000' },
+    ]);
+    const editor = new EditorSession(doc);
+    expect(editor.colorSlot).toBe(2);
+  });
+
+  it('unhides legacy ink if it was hidden and no other black exists', () => {
+    const doc = createDocument(2, 2, [{ id: 'ink', name: 'Чернь', hex: '#1a1614', hidden: true }]);
+    const editor = new EditorSession(doc);
+    expect(editor.doc.palette[0]?.hidden).toBeUndefined();
+    expect(editor.doc.palette[0]?.hex).toBe('#000000');
+    expect(editor.colorSlot).toBe(1);
+  });
+
+  it('hides duplicate legacy ink if another visible black was used on canvas', () => {
+    const doc = createDocument(2, 2, [
+      { id: 'ink', name: 'Чернь', hex: '#1a1614' },
+      { id: 'c2', name: '#000000', hex: '#000000' },
+    ]);
+    doc.cells[0] = 2;
+    const editor = new EditorSession(doc);
+    expect(editor.doc.palette[0]?.hidden).toBe(true);
+    expect(editor.doc.palette[1]?.hex).toBe('#000000');
     expect(editor.colorSlot).toBe(2);
   });
 });

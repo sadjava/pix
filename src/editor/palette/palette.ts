@@ -13,6 +13,46 @@ export function defaultPalette(): PaletteColor[] {
   return [{ id: 'black', name: 'Чёрный', hex: '#000000' }];
 }
 
+export function migratePalette(palette: PaletteColor[], cells?: Uint16Array): PaletteColor[] {
+  if (!Array.isArray(palette) || palette.length === 0) return defaultPalette();
+
+  let hasOtherVisibleBlack = false;
+  for (const color of palette) {
+    const isLegacyInk = color.id === 'ink' || color.hex.toLowerCase() === '#1a1614';
+    if (!isLegacyInk && color.hex.toLowerCase() === '#000000' && !color.hidden) {
+      hasOtherVisibleBlack = true;
+      break;
+    }
+  }
+
+  return palette.map((color, index) => {
+    const isLegacyInk = color.id === 'ink' || color.hex.toLowerCase() === '#1a1614';
+    if (!isLegacyInk) return color;
+
+    const slot = slotOf(index);
+    const usedOnCanvas = cells ? colorUsed(cells, slot) : false;
+
+    if (hasOtherVisibleBlack && !usedOnCanvas) {
+      return {
+        ...color,
+        name: color.name === 'Чернь' ? 'Чёрный' : color.name,
+        hex: '#000000',
+        hidden: true,
+      };
+    }
+
+    const next: PaletteColor = {
+      ...color,
+      name: color.name === 'Чернь' ? 'Чёрный' : color.name,
+      hex: '#000000',
+    };
+    if (next.hidden && !hasOtherVisibleBlack) {
+      delete next.hidden;
+    }
+    return next;
+  });
+}
+
 /**
  * Newest slot last in `order`.
  * A new hex is appended. It never rewrites an older slot, because those numbers are already on the canvas.

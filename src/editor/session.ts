@@ -27,7 +27,7 @@ import {
   type SelectionHandle,
   type SelectionRect,
 } from './selection/selection.ts';
-import { pickRecentColor, revealColor, slotOf } from './palette/palette.ts';
+import { migratePalette, pickRecentColor, revealColor, slotOf } from './palette/palette.ts';
 import type { TraceSprite } from './trace/trace.ts';
 
 export interface GesturePreview {
@@ -143,13 +143,21 @@ export class EditorSession {
   private now: () => number;
 
   constructor(doc: ProjectDocument, history: HistoryStacks = emptyHistory(), revision = 0, now = () => Date.now()) {
-    this.doc = doc;
+    const palette = migratePalette(doc.palette, doc.cells);
+    this.doc = palette !== doc.palette ? { ...doc, palette } : doc;
     this.history = history;
     this.revision = revision;
     this.now = now;
-    this.colorOrder = doc.palette.map((_, index) => index + 1);
-    const newest = this.colorOrder[this.colorOrder.length - 1];
-    if (newest && !this.colorOrder.includes(this.colorSlot)) this.colorSlot = newest;
+    this.colorOrder = this.doc.palette.map((_, index) => index + 1);
+    const blackIndex = this.doc.palette.findIndex((c) => !c.hidden && c.hex.toLowerCase() === '#000000');
+    const firstVisibleIndex = this.doc.palette.findIndex((c) => !c.hidden);
+    if (blackIndex >= 0) {
+      this.colorSlot = blackIndex + 1;
+    } else if (firstVisibleIndex >= 0) {
+      this.colorSlot = firstVisibleIndex + 1;
+    } else {
+      this.colorSlot = 1;
+    }
   }
 
   setTool(tool: ToolId): void {
@@ -780,9 +788,19 @@ export class EditorSession {
 
   replaceDocument(doc: ProjectDocument): void {
     this.cancelGesture();
-    this.doc = doc;
+    const palette = migratePalette(doc.palette, doc.cells);
+    this.doc = palette !== doc.palette ? { ...doc, palette } : doc;
     this.selection = null;
-    this.colorOrder = doc.palette.map((_, index) => index + 1);
+    this.colorOrder = this.doc.palette.map((_, index) => index + 1);
+    const blackIndex = this.doc.palette.findIndex((c) => !c.hidden && c.hex.toLowerCase() === '#000000');
+    const firstVisibleIndex = this.doc.palette.findIndex((c) => !c.hidden);
+    if (blackIndex >= 0) {
+      this.colorSlot = blackIndex + 1;
+    } else if (firstVisibleIndex >= 0) {
+      this.colorSlot = firstVisibleIndex + 1;
+    } else {
+      this.colorSlot = 1;
+    }
     this.revision += 1;
     this.persist('replace', [], false);
   }
@@ -906,7 +924,7 @@ export class EditorSession {
 
   private restorePalette(palette: PaletteColor[] | undefined, slot: number | undefined): void {
     if (!palette) return;
-    this.doc = { ...this.doc, palette: palette.map((color) => ({ ...color })) };
+    this.doc = { ...this.doc, palette: migratePalette(palette, this.doc.cells) };
     if (typeof slot === 'number') this.colorSlot = slot;
     this.previousSlot = null;
     this.colorOrder = this.doc.palette.map((_, index) => index + 1);

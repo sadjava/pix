@@ -1,5 +1,6 @@
 import { SCHEMA_VERSION, type JournalEntry, type ProjectDocument } from '../model/types.ts';
 import { createDocument } from '../editor/canvas/grid.ts';
+import { migratePalette } from '../editor/palette/palette.ts';
 import { cellsToBytes } from '../export/json.ts';
 
 export function recoverCells(cells: Uint16Array, revision: number, journal: readonly JournalEntry[]): Uint16Array {
@@ -44,10 +45,11 @@ function documentFromParts(record: Record<string, unknown>): ProjectDocument | n
   if (!Array.isArray(record.palette)) return null;
   const base = createDocument(width, height);
   const symmetry = record.symmetry;
+  const palette = migratePalette(record.palette as ProjectDocument['palette'], cells);
   return {
     ...base,
     schemaVersion: SCHEMA_VERSION,
-    palette: record.palette as ProjectDocument['palette'],
+    palette,
     cells,
     gridVisible: record.gridVisible !== false,
     checkerVisible: record.checkerVisible === true,

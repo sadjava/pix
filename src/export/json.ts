@@ -151,7 +151,10 @@ function parsePalette(value: unknown): PaletteColor[] | null {
     if (typeof color.id !== 'string' || typeof color.name !== 'string' || typeof color.hex !== 'string') return null;
     const hex = normalizeHex(color.hex);
     if (!hex) return null;
-    colors.push({ id: color.id, name: color.name, hex });
+    const isLegacyInk = color.id === 'ink' || hex === '#1a1614';
+    const finalHex = isLegacyInk ? '#000000' : hex;
+    const finalName = isLegacyInk && color.name === 'Чернь' ? 'Чёрный' : color.name;
+    colors.push({ id: color.id, name: finalName, hex: finalHex });
   }
   return colors;
 }

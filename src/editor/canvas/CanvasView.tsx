@@ -690,6 +690,7 @@ function draw(
     pixelsPerCell: 1,
     border: false,
     checkerBlock: session.doc.checkerBlock,
+    transparent: true,
   });
   const sample = document.createElement('canvas');
   sample.width = image.width;

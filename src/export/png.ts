@@ -6,12 +6,15 @@ export interface ExportOptions {
   pixelsPerCell: number;
   border: boolean;
   checkerBlock: number;
+  transparent?: boolean;
 }
 
 const CHECK_A: Rgba = [232, 226, 216, 255];
 const CHECK_B: Rgba = [196, 188, 176, 255];
 const GRID: Rgba = [42, 34, 28, 255];
 const BORDER: Rgba = [58, 46, 40, 255];
+const WHITE: Rgba = [255, 255, 255, 255];
+const TRANSPARENT: Rgba = [0, 0, 0, 0];
 
 type Rgba = [number, number, number, number];
 
@@ -61,6 +64,7 @@ export function rugPreview(doc: ProjectDocument, maxWidth: number): {
       pixelsPerCell: zoom,
       border: false,
       checkerBlock: doc.checkerBlock,
+      transparent: true,
     });
   }
   const width = Math.min(box, doc.width);
@@ -72,6 +76,7 @@ export function rugPreview(doc: ProjectDocument, maxWidth: number): {
     pixelsPerCell: 1,
     border: false,
     checkerBlock: doc.checkerBlock,
+    transparent: true,
   };
   for (let y = 0; y < height; y += 1) {
     const sy = Math.min(doc.height - 1, Math.floor((y * doc.height) / height));
@@ -90,10 +95,13 @@ export function rugPreview(doc: ProjectDocument, maxWidth: number): {
 }
 
 function emptyColor(x: number, y: number, options: ExportOptions): Rgba {
-  if (!options.checker) return [0, 0, 0, 0];
-  const block = Math.max(1, options.checkerBlock);
-  const dark = (Math.floor(x / block) + Math.floor(y / block)) % 2 === 0;
-  return dark ? CHECK_A : CHECK_B;
+  if (options.checker) {
+    const block = Math.max(1, options.checkerBlock);
+    const dark = (Math.floor(x / block) + Math.floor(y / block)) % 2 === 0;
+    return dark ? CHECK_A : CHECK_B;
+  }
+  if (options.transparent) return TRANSPARENT;
+  return WHITE;
 }
 
 function hexRgba(color: PaletteColor | undefined): Rgba {

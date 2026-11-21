@@ -72,6 +72,7 @@ export const ru = {
   replaceWith: 'Заменить клетки на',
   grid: 'Сетка',
   checker: 'Шахматка',
+  transparent: 'Прозрачный фон',
   checkerBlock: 'Блок шахматки',
   checkerLess: 'Меньше блок шахматки',
   checkerMore: 'Больше блок шахматки',

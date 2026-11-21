@@ -49,6 +49,7 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
   const [pngChecker, setPngChecker] = useState(false);
   const [pngScale, setPngScale] = useState(8);
   const [pngBorder, setPngBorder] = useState(false);
+  const [pngTransparent, setPngTransparent] = useState(false);
   const [panelOpen, setPanelOpen] = useState(() => window.matchMedia('(min-width: 1201px)').matches);
   const [axisSnap, setAxisSnap] = useState<'center' | 'edge'>('edge');
   const [axisLocked, setAxisLocked] = useState(false);
@@ -520,9 +521,10 @@ export function EditorScreen({ id, onBack, onBusy }: { id: string; onBack: () =>
           <label className="check"><input type="checkbox" checked={pngGrid} onChange={(event) => setPngGrid(event.target.checked)} />{ru.grid}</label>
           <label className="check"><input type="checkbox" checked={pngChecker} onChange={(event) => setPngChecker(event.target.checked)} />{ru.checker}</label>
           <label className="check"><input type="checkbox" checked={pngBorder} onChange={(event) => setPngBorder(event.target.checked)} />{ru.border}</label>
+          <label className="check"><input type="checkbox" checked={pngTransparent} onChange={(event) => setPngTransparent(event.target.checked)} />{ru.transparent}</label>
           <label>{ru.pixelsPerCell}<input type="number" min={1} max={64} value={pngScale} onChange={(event) => setPngScale(Number(event.target.value) || 1)} /></label>
           <button type="button" onClick={() => {
-            const bytes = pngBytes(session.doc, { grid: pngGrid, checker: pngChecker, pixelsPerCell: pngScale, border: pngBorder, checkerBlock: session.doc.checkerBlock });
+            const bytes = pngBytes(session.doc, { grid: pngGrid, checker: pngChecker, pixelsPerCell: pngScale, border: pngBorder, checkerBlock: session.doc.checkerBlock, transparent: pngTransparent });
             download(bytes, `${record.name}.png`, 'image/png');
           }}>{ru.download}</button>
           <button type="button" onClick={() => setPngOpen(false)}>{ru.close}</button>

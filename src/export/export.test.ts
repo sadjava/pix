@@ -13,7 +13,11 @@ describe('png export', () => {
     expect(clean.height).toBe(8);
     expect([clean.data[0], clean.data[1], clean.data[2], clean.data[3]]).toEqual([0, 0, 0, 255]);
     const interior = (5 * 8 + 5) * 4;
-    expect(clean.data[interior + 3]).toBe(0);
+    expect([clean.data[interior], clean.data[interior + 1], clean.data[interior + 2], clean.data[interior + 3]]).toEqual([
+      255, 255, 255, 255,
+    ]);
+    const transparent = renderRgba(doc, { grid: false, checker: false, pixelsPerCell: 4, border: false, checkerBlock: 1, transparent: true });
+    expect(transparent.data[interior + 3]).toBe(0);
     const checker = renderRgba(doc, { grid: false, checker: true, pixelsPerCell: 4, border: false, checkerBlock: 1 });
     expect(checker.data[interior + 3]).toBe(255);
     const grid = renderRgba(doc, { grid: true, checker: false, pixelsPerCell: 4, border: false, checkerBlock: 1 });

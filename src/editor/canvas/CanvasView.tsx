@@ -10,6 +10,7 @@ import { selectionSizeLabel } from '../session.ts';
 import { axis2FromCellSpace, backingStoreSize, containViewport, fitViewport, gestureViewport, panBy, resizeViewport, screenToCell, snapAxis, zoomAt } from './coords.ts';
 import { drawMaskOutline, snapRotation, type SelectionHandle, type SelectionRect } from '../selection/selection.ts';
 import { gripAt, placeTrace, type SourceCrop, type TraceFrame, type TraceGrip, type TraceSprite } from '../trace/trace.ts';
+import { ColorPickerPopover, type ColorPickerMode } from '../palette/ColorPickerPopover.tsx';
 
 type AxisName = 'vertical' | 'horizontal';
 
@@ -50,9 +51,8 @@ export function CanvasView({
   const space = useRef(false);
   const [readout, setReadout] = useState<string | null>(null);
   const [axisCursor, setAxisCursor] = useState<AxisName | null>(null);
-  const [draftHex, setDraftHex] = useState<string | null>(null);
-  const colorTimer = useRef(0);
-  useEffect(() => () => window.clearTimeout(colorTimer.current), []);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<ColorPickerMode>('normal');
 
   useEffect(() => {
     draw(wrapRef.current, pixelRef.current, overlayRef.current, session, axisDrag.current);
@@ -268,6 +268,10 @@ export function CanvasView({
       onPointerDown={(event) => {
         if ((event.pointerType === 'pen' || (event.pointerType as string) === 'eraser') && event.pressure === 0) {
           event.preventDefault();
+          return;
+        }
+        if (pickerOpen) {
+          setPickerOpen(false);
           return;
         }
         try {
@@ -539,6 +543,22 @@ export function CanvasView({
       <canvas ref={pixelRef} />
       <canvas ref={overlayRef} className="overlay" />
       <div className="color-dock" onPointerDown={(event) => event.stopPropagation()}>
+        {pickerOpen ? (
+          <ColorPickerPopover
+            activeHex={session.doc.palette[session.colorSlot - 1]?.hex ?? '#000000'}
+            mode={pickerMode}
+            onModeChange={setPickerMode}
+            onPickNew={(hex) => {
+              session.useColor(hex);
+              onChange();
+            }}
+            onEditCurrent={(hex) => {
+              session.editColor(session.colorSlot, hex);
+              onChange();
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        ) : null}
         <div className="color-pair">
           <button
             type="button"
@@ -553,29 +573,26 @@ export function CanvasView({
             type="button"
             className="color-now"
             style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#000000' }}
-            aria-label={ru.currentColor}
-            title={ru.currentColor}
-            onClick={() => { session.swapColors(); onChange(); }}
+            aria-label={ru.editColor}
+            title={ru.editColor}
+            aria-expanded={pickerOpen}
+            onClick={() => setPickerOpen((open) => !open)}
           />
         </div>
         <div className="palette" aria-label={ru.palette}>
-          <label className="wheel" title={ru.pickColor}>
-            <input
-              type="color"
-              aria-label={ru.pickColor}
-              value={draftHex ?? session.doc.palette[session.colorSlot - 1]?.hex ?? '#000000'}
-              onChange={(event) => {
-                const hex = event.target.value;
-                setDraftHex(hex);
-                window.clearTimeout(colorTimer.current);
-                colorTimer.current = window.setTimeout(() => {
-                  session.useColor(hex);
-                  setDraftHex(null);
-                  onChange();
-                }, 250);
-              }}
+          <button
+            type="button"
+            className="wheel"
+            aria-label={ru.pickColor}
+            title={ru.pickColor}
+            aria-expanded={pickerOpen}
+            onClick={() => setPickerOpen((open) => !open)}
+          >
+            <span
+              className="wheel-dot"
+              style={{ background: session.doc.palette[session.colorSlot - 1]?.hex ?? '#000000' }}
             />
-          </label>
+          </button>
           {session.doc.palette.map((color, index) => {
             if (color.hidden) return null;
             const slot = index + 1;

@@ -18,7 +18,7 @@ export function migratePalette(palette: PaletteColor[], cells?: Uint16Array): Pa
 
   let hasOtherVisibleBlack = false;
   for (const color of palette) {
-    const isLegacyInk = color.id === 'ink' || color.hex.toLowerCase() === '#1a1614';
+    const isLegacyInk = color.hex.toLowerCase() === '#1a1614';
     if (!isLegacyInk && color.hex.toLowerCase() === '#000000' && !color.hidden) {
       hasOtherVisibleBlack = true;
       break;
@@ -26,7 +26,7 @@ export function migratePalette(palette: PaletteColor[], cells?: Uint16Array): Pa
   }
 
   return palette.map((color, index) => {
-    const isLegacyInk = color.id === 'ink' || color.hex.toLowerCase() === '#1a1614';
+    const isLegacyInk = color.hex.toLowerCase() === '#1a1614';
     if (!isLegacyInk) return color;
 
     const slot = slotOf(index);

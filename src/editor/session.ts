@@ -27,7 +27,7 @@ import {
   type SelectionHandle,
   type SelectionRect,
 } from './selection/selection.ts';
-import { migratePalette, pickRecentColor, revealColor, slotOf } from './palette/palette.ts';
+import { migratePalette, normalizeHex, pickRecentColor, revealColor, slotOf } from './palette/palette.ts';
 import type { TraceSprite } from './trace/trace.ts';
 
 export interface GesturePreview {
@@ -197,6 +197,22 @@ export class EditorSession {
       : picked.palette;
     this.setColorSlot(picked.slot);
     if (palette !== this.doc.palette) this.setView({ palette });
+  }
+
+  /** Update an existing palette slot in-place (recolors stitches of that slot) with undo support. */
+  editColor(slot: number, hex: string): boolean {
+    const normalized = normalizeHex(hex);
+    if (!normalized) return false;
+    const index = slot - 1;
+    const current = this.doc.palette[index];
+    if (!current || current.hex === normalized) return false;
+    const before = this.doc.palette.map((c) => ({ ...c }));
+    const after = this.doc.palette.map((c, i) =>
+      i === index ? revealColor({ ...c, hex: normalized, name: normalized }) : { ...c },
+    );
+    this.doc = { ...this.doc, palette: after };
+    this.commit('palette', [], true, { before, after, slotBefore: this.colorSlot, slotAfter: this.colorSlot });
+    return true;
   }
 
   setPenErase(erasing: boolean): void {

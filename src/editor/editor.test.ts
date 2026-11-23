@@ -4,6 +4,19 @@ import { createDocument, resizeDocument, sizeDecision } from './canvas/grid.ts';
 import { emptyHistory } from './history/patches.ts';
 import { mirrorColumn, mirrorRow } from './symmetry/reflect.ts';
 import { migratePalette, pickRecentColor } from './palette/palette.ts';
+import {
+  PASTEL_PRESETS,
+  PASTEL_S_MAX,
+  PASTEL_S_MIN,
+  PASTEL_V_MAX,
+  PASTEL_V_MIN,
+  hexToHsv,
+  hsvToHex,
+  hsvToPad,
+  isPastelHsv,
+  padToHsv,
+  toPastelHsv,
+} from './palette/colorMath.ts';
 import { EditorSession, penButtonHover, stylusErasing } from './session.ts';
 import { floodIndices } from './tools/fill.ts';
 import { bresenham } from './tools/stroke.ts';
@@ -499,6 +512,56 @@ describe('recolor and delete', () => {
     expect(editor.doc.palette[0]?.hidden).toBe(true);
     expect(editor.doc.palette[1]?.hex).toBe('#000000');
     expect(editor.colorSlot).toBe(2);
+  });
+
+  it('edits the active palette color in-place with undo and redo support', () => {
+    const doc = createDocument(2, 2, [{ id: 'ink', name: 'Чёрный', hex: '#000000' }]);
+    const editor = new EditorSession(doc);
+    editor.doc.cells[0] = 1;
+    expect(editor.editColor(1, '#d9bc8c')).toBe(true);
+    expect(editor.doc.palette[0]?.hex).toBe('#d9bc8c');
+    expect(editor.doc.cells[0]).toBe(1);
+    editor.undo();
+    expect(editor.doc.palette[0]?.hex).toBe('#000000');
+    editor.redo();
+    expect(editor.doc.palette[0]?.hex).toBe('#d9bc8c');
+  });
+});
+
+describe('color math and pastel mode', () => {
+  it('round-trips hex through HSV accurately', () => {
+    for (const hex of ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', '#d9bc8c', '#d2c4d4']) {
+      const hsv = hexToHsv(hex);
+      expect(hsvToHex(hsv.h, hsv.s, hsv.v)).toBe(hex);
+    }
+  });
+
+  it('maps any color into the pastel gamut while preserving hue', () => {
+    const brightRed = hexToHsv('#ff0000');
+    const pastelRed = toPastelHsv(brightRed);
+    expect(pastelRed.h).toBeCloseTo(0, 1);
+    expect(pastelRed.s).toBeGreaterThanOrEqual(PASTEL_S_MIN);
+    expect(pastelRed.s).toBeLessThanOrEqual(PASTEL_S_MAX);
+    expect(pastelRed.v).toBeGreaterThanOrEqual(PASTEL_V_MIN);
+    expect(pastelRed.v).toBeLessThanOrEqual(PASTEL_V_MAX);
+    expect(isPastelHsv(pastelRed)).toBe(true);
+    expect(isPastelHsv(brightRed)).toBe(false);
+  });
+
+  it('round-trips 2D pad coordinates in both normal and pastel modes', () => {
+    for (const pastel of [false, true]) {
+      const hsv = padToHsv(0.35, 0.4, 210, pastel);
+      const back = hsvToPad(hsv, pastel);
+      expect(back.nx).toBeCloseTo(0.35, 5);
+      expect(back.ny).toBeCloseTo(0.4, 5);
+    }
+  });
+
+  it('keeps all curated pastel presets inside the pastel gamut', () => {
+    expect(PASTEL_PRESETS.length).toBeGreaterThanOrEqual(9);
+    for (const hex of PASTEL_PRESETS) {
+      expect(isPastelHsv(hexToHsv(hex))).toBe(true);
+    }
   });
 });
 
